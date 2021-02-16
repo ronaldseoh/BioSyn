@@ -11,6 +11,9 @@ from src.biosyn import (
     QueryDataset,
     BioSyn
 )
+
+from IPython import embed
+
 LOGGER = logging.getLogger()
 
 def parse_args():
@@ -26,6 +29,8 @@ def parse_args():
 
     # Run settings
     parser.add_argument('--use_cuda',  action="store_true")
+    parser.add_argument('--normalize_vecs',  action="store_true")
+    parser.add_argument('--type_given',  action="store_true")
     parser.add_argument('--topk',  type=int, default=20)
     parser.add_argument('--score_mode',  type=str, default='hybrid', help='hybrid/dense/sparse')
     parser.add_argument('--output_dir', type=str, default='./output/', help='Directory for output')
@@ -76,6 +81,7 @@ def main(args):
     biosyn = BioSyn().load_model(
             path=args.model_dir,
             max_length=args.max_length,
+            normalize_vecs=args.normalize_vecs,
             use_cuda=args.use_cuda
     )
     
@@ -84,11 +90,17 @@ def main(args):
         eval_dictionary=eval_dictionary,
         eval_queries=eval_queries,
         topk=args.topk,
-        score_mode=args.score_mode
+        score_mode=args.score_mode,
+        type_given=args.type_given
     )
-    
+
     LOGGER.info("acc@1={}".format(result_evalset['acc1']))
-    LOGGER.info("acc@5={}".format(result_evalset['acc5']))
+    LOGGER.info("acc@2={}".format(result_evalset['acc2']))
+    LOGGER.info("acc@4={}".format(result_evalset['acc4']))
+    LOGGER.info("acc@8={}".format(result_evalset['acc8']))
+    LOGGER.info("acc@16={}".format(result_evalset['acc16']))
+    LOGGER.info("acc@32={}".format(result_evalset['acc32']))
+    LOGGER.info("acc@64={}".format(result_evalset['acc64']))
     
     if args.save_predictions:
         output_file = os.path.join(args.output_dir,"predictions_eval.json")

@@ -6,14 +6,17 @@ import torch.nn.functional as F
 from collections import OrderedDict
 from transformers import BertModel as bm
 
+from IPython import embed
+
 
 class BertModel(nn.Module):
 
-    def __init__(self, path, config, use_cuda):
+    def __init__(self, path, config, normalize_vecs, use_cuda):
         logging.info("BertModel! use_cuda={}".format(use_cuda))
         super(BertModel, self).__init__()
         self.load_pretrained(path, config) # load pretrained
         self.embed_dim = 768
+        self.normalize_vecs = normalize_vecs
         self.use_cuda = use_cuda
         if self.use_cuda:
             self.model = self.model.cuda()
@@ -48,8 +51,14 @@ class BertModel(nn.Module):
         if self.use_cuda:
             input_ids = input_ids.cuda()
             input_masks = input_masks.cuda()
-        last_hidden_state, _ = self.model(input_ids=input_ids,attention_mask=input_masks)
+        last_hidden_state = self.model(input_ids=input_ids,attention_mask=input_masks)[0]
+
         x = last_hidden_state[:,0] # CLS token representation
+
+        if self.normalize_vecs:
+            norm = x.norm(p=2, dim=1, keepdim=True)
+            x = x.div(norm)
+
         return x
 
     def cuda(self):

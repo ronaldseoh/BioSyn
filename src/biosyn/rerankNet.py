@@ -4,6 +4,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 import logging
 from tqdm import tqdm
+
+from IPython import embed
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -45,6 +48,7 @@ class RerankNet(nn.Module):
         
         # score dense candidates
         candidate_d_score = torch.bmm(query_embed, candidate_embeds.permute(0,2,1)).squeeze(1)
+
         score = self.sparse_weight * candidate_s_scores + candidate_d_score
         return score
 

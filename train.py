@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import torch
 import argparse
@@ -7,6 +8,7 @@ import pdb
 import os
 import json
 import random
+import pickle
 from utils import (
     evaluate
 )
@@ -19,6 +21,8 @@ from src.biosyn import (
     RerankNet, 
     BioSyn
 )
+
+from IPython import embed
 
 LOGGER = logging.getLogger()
 
@@ -45,6 +49,7 @@ def parse_args():
     parser.add_argument('--seed',  type=int, 
                         default=0)
     parser.add_argument('--use_cuda',  action="store_true")
+    parser.add_argument('--normalize_vecs',  action="store_true")
     parser.add_argument('--topk',  type=int, 
                         default=20)
     parser.add_argument('--learning_rate',
@@ -99,8 +104,8 @@ def load_dictionary(dictionary_path):
     dictionary = DictionaryDataset(
             dictionary_path = dictionary_path
     )
-    
-    return dictionary.data
+
+    return dictionary.data[:, 0::2]
     
 def load_queries(data_dir, filter_composite, filter_duplicate):
     """
@@ -109,7 +114,6 @@ def load_queries(data_dir, filter_composite, filter_duplicate):
     Parameters
     ----------
     is_train : bool
-        train or dev
     filter_composite : bool
         filter composite mentions
     filter_duplicate : bool
@@ -158,7 +162,7 @@ def main(args):
         filter_composite=True,
         filter_duplicate=True
     )
-        
+
     # filter only names
     names_in_train_dictionary = train_dictionary[:,0]
     names_in_train_queries = train_queries[:,0]
@@ -168,6 +172,7 @@ def main(args):
     encoder, tokenizer = biosyn.load_bert(
         path=args.model_dir, 
         max_length=args.max_length,
+        normalize_vecs=args.normalize_vecs,
         use_cuda=args.use_cuda,
     )
     sparse_encoder = biosyn.train_sparse_encoder(corpus=names_in_train_dictionary)
@@ -178,7 +183,7 @@ def main(args):
     
     # load rerank model
     model = RerankNet(
-        encoder = encoder,
+        encoder=encoder,
         learning_rate=args.learning_rate, 
         weight_decay=args.weight_decay,
         sparse_weight=sparse_weight,
@@ -188,16 +193,21 @@ def main(args):
     # embed sparse representations for query and dictionary
     # Important! This is one time process because sparse represenation never changes.
     LOGGER.info("Sparse embedding")
-    train_query_sparse_embeds = biosyn.embed_sparse(names=names_in_train_queries)
-    train_dict_sparse_embeds = biosyn.embed_sparse(names=names_in_train_dictionary)
-    train_sparse_score_matrix = biosyn.get_score_matrix(
-        query_embeds=train_query_sparse_embeds, 
-        dict_embeds=train_dict_sparse_embeds
+    
+    train_query_sparse_embeds = biosyn.embed_sparse(
+        names=names_in_train_queries, show_progress=True
     )
-    train_sparse_candidate_idxs = biosyn.retrieve_candidate(
-        score_matrix=train_sparse_score_matrix, 
-        topk=args.topk
+    train_dict_sparse_embeds = biosyn.embed_sparse(
+        names=names_in_train_dictionary, show_progress=True
     )
+
+    # get sparse knn
+    sparse_knn = biosyn.get_sparse_knn(
+        train_query_sparse_embeds,
+        train_dict_sparse_embeds,
+        args.topk
+    )
+    train_sparse_candidate_idxs, _ = sparse_knn
 
     # prepare for data loader of train and dev
     train_set = CandidateDataset(
@@ -206,7 +216,8 @@ def main(args):
         tokenizer = tokenizer, 
         topk = args.topk, 
         d_ratio=args.dense_ratio,
-        s_score_matrix=train_sparse_score_matrix,
+        s_query_embeds=train_query_sparse_embeds,
+        s_dict_embeds=train_dict_sparse_embeds,
         s_candidate_idxs=train_sparse_candidate_idxs
     )
     train_loader = torch.utils.data.DataLoader(
@@ -221,16 +232,22 @@ def main(args):
         # Important! This is iterative process because dense represenation changes as model is trained.
         LOGGER.info("Epoch {}/{}".format(epoch,args.epoch))
         LOGGER.info("train_set dense embedding for iterative candidate retrieval")
-        train_query_dense_embeds = biosyn.embed_dense(names=names_in_train_queries, show_progress=True)
-        train_dict_dense_embeds = biosyn.embed_dense(names=names_in_train_dictionary, show_progress=True)
-        train_dense_score_matrix = biosyn.get_score_matrix(
-            query_embeds=train_query_dense_embeds, 
-            dict_embeds=train_dict_dense_embeds
+
+        train_query_dense_embeds = biosyn.embed_dense(
+            names=names_in_train_queries, show_progress=True
         )
-        train_dense_candidate_idxs = biosyn.retrieve_candidate(
-            score_matrix=train_dense_score_matrix, 
-            topk=args.topk
+        train_dict_dense_embeds = biosyn.embed_dense(
+            names=names_in_train_dictionary, show_progress=True
         )
+
+        # get dense knn
+        dense_knn = biosyn.get_dense_knn(
+            train_query_dense_embeds,
+            train_dict_dense_embeds,
+            args.topk
+        )
+        train_dense_candidate_idxs, _ = dense_knn
+
         # replace dense candidates in the train_set
         train_set.set_dense_candidate_idxs(d_candidate_idxs=train_dense_candidate_idxs)
 

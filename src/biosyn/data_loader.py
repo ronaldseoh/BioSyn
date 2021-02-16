@@ -4,7 +4,12 @@ import glob
 import numpy as np
 from torch.utils.data import Dataset
 import logging
-from tqdm import tqdm
+import pickle
+import time
+from tqdm import tqdm, trange
+
+from IPython import embed
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -61,14 +66,17 @@ class QueryDataset(Dataset):
 
             for concept in concepts:
                 concept = concept.split("||")
+                pmid = concept[0]
+                start_char, end_char = concept[1].split("|")
                 mention = concept[3].strip()
                 cui = concept[4].strip()
+                sty = concept[2].strip()
                 is_composite = (cui.replace("+","|").count("|") > 0)
 
                 if filter_composite and is_composite:
                     continue
                 else:
-                    data.append((mention,cui))
+                    data.append((mention,cui,sty,pmid,start_char,end_char))
         
         if filter_duplicate:
             data = list(dict.fromkeys(data))
@@ -105,8 +113,9 @@ class DictionaryDataset():
             for line in tqdm(lines):
                 line = line.strip()
                 if line == "": continue
-                cui, name = line.split("||")
-                data.append((name,cui))
+                cui, sty, name = line.split("||")
+                assert sty != ''
+                data.append((name, sty, cui))
         
         data = np.array(data)
         return data
@@ -117,7 +126,15 @@ class CandidateDataset(Dataset):
     Candidate Dataset for:
         query_tokens, candidate_tokens, label
     """
-    def __init__(self, queries, dicts, tokenizer, topk, d_ratio, s_score_matrix, s_candidate_idxs):
+    def __init__(self,
+                 queries,
+                 dicts,
+                 tokenizer,
+                 topk,
+                 d_ratio,
+                 s_query_embeds,
+                 s_dict_embeds,
+                 s_candidate_idxs):
         """
         Retrieve top-k candidates based on sparse/dense embedding
 
@@ -133,60 +150,108 @@ class CandidateDataset(Dataset):
             The number of candidates
         d_ratio : float
             The ratio of dense candidates from top-k
-        s_score_matrix : np.array
+        s_query_embeds : scipy.sparse.csr_matrix
+            The sparse embeddings of all of the queries
+        s_dict_embeds : scipy.sparse.csr_matrix
+            The sparse embeddings of all of the dict items
         s_candidate_idxs : np.array
         """
         LOGGER.info("CandidateDataset! len(queries)={} len(dicts)={} topk={} d_ratio={}".format(
             len(queries),len(dicts), topk, d_ratio))
         self.query_names, self.query_ids = [row[0] for row in queries], [row[1] for row in queries]
         self.dict_names, self.dict_ids = [row[0] for row in dicts], [row[1] for row in dicts]
+        self.dict_ids_ndarray = np.array(self.dict_ids)
         self.topk = topk
         self.n_dense = int(topk * d_ratio)
         self.n_sparse = topk - self.n_dense
         self.tokenizer = tokenizer
 
-        self.s_score_matrix = s_score_matrix
+        self.s_query_embeds = s_query_embeds
+        self.s_dict_embeds = s_dict_embeds
         self.s_candidate_idxs = s_candidate_idxs
         self.d_candidate_idxs = None
+        self.examples = {}
+
+        #tokenized_names_file = 'tokenized_names.medmentions.pkl'
+        #if not os.path.exists(tokenized_names_file):
+        #    LOGGER.info("tokenizing query names!")
+        #    self.all_query_tokens = {i : self.tokenizer.transform([query_name])
+        #        for i, query_name in enumerate(tqdm(self.query_names))
+        #    }
+
+        #    LOGGER.info("tokenizing dict names!")
+        #    self.all_dict_tokens = {i : self.tokenizer.transform([dict_name])
+        #        for i, dict_name in enumerate(tqdm(self.dict_names))
+        #    }
+        #    with open(tokenized_names_file, 'wb') as f:
+        #        pickle.dump(
+        #            (self.all_query_tokens, self.all_dict_tokens), f
+        #        )
+        #else:
+        #    with open(tokenized_names_file, 'rb') as f:
+        #        _loaded_pkl = pickle.load(f)
+        #    self.all_query_tokens, self.all_dict_tokens = _loaded_pkl
+        LOGGER.info("tokenizing query names!")
+        self.all_query_tokens = {i : self.tokenizer.transform([query_name])
+            for i, query_name in enumerate(tqdm(self.query_names))
+        }
+
+        LOGGER.info("tokenizing dict names!")
+        self.all_dict_tokens = {i : self.tokenizer.transform([dict_name])
+            for i, dict_name in enumerate(tqdm(self.dict_names))
+        }
 
     def set_dense_candidate_idxs(self, d_candidate_idxs):
         self.d_candidate_idxs = d_candidate_idxs
-    
-    def __getitem__(self, query_idx):
+        self.rebuild_examples()
+
+    def rebuild_examples(self):
         assert (self.s_candidate_idxs is not None)
-        assert (self.s_score_matrix is not None)
+        assert (self.s_query_embeds is not None)
+        assert (self.s_dict_embeds is not None)
         assert (self.d_candidate_idxs is not None)
 
-        query_name = self.query_names[query_idx]
-        query_token = self.tokenizer.transform([query_name])
+        LOGGER.info("Rebuilding candidate examples for dataloader!")
+        for query_idx in trange(len(self.query_names)):
+            # get the query token ids
+            query_token = self.all_query_tokens[query_idx]
 
-        # combine sparse and dense candidates as many as top-k
-        s_candidate_idx = self.s_candidate_idxs[query_idx]
-        d_candidate_idx = self.d_candidate_idxs[query_idx]
-        
-        # fill with sparse candidates first
-        topk_candidate_idx = s_candidate_idx[:self.n_sparse]
-        
-        # fill remaining candidates with dense
-        for d_idx in d_candidate_idx:
-            if len(topk_candidate_idx) >= self.topk:
-                break
-            if d_idx not in topk_candidate_idx:
-                topk_candidate_idx = np.append(topk_candidate_idx,d_idx)
-        
-        # sanity check
-        assert len(topk_candidate_idx) == self.topk
-        assert len(topk_candidate_idx) == len(set(topk_candidate_idx))
-        
-        candidate_names = [self.dict_names[candidate_idx] for candidate_idx in topk_candidate_idx]
-        candidate_s_scores = self.s_score_matrix[query_idx][topk_candidate_idx]
-        labels = self.get_labels(query_idx, topk_candidate_idx).astype(np.float32)
-        query_token = np.array(query_token).squeeze()
+            # combine sparse and dense candidates as many as top-k
+            s_candidate_idx = self.s_candidate_idxs[query_idx]
+            d_candidate_idx = self.d_candidate_idxs[query_idx]
 
-        candidate_tokens = self.tokenizer.transform(candidate_names)
-        candidate_tokens = np.array(candidate_tokens)
-        
-        return (query_token, candidate_tokens, candidate_s_scores), labels
+            # fill with sparse candidates first
+            topk_candidate_idx = s_candidate_idx[:self.n_sparse]
+
+            # fill remaining candidates with dense
+            n_dense = self.topk - self.n_sparse
+            novel_mask = ~np.in1d(d_candidate_idx, topk_candidate_idx)
+            topk_candidate_idx = np.hstack(
+                (topk_candidate_idx, d_candidate_idx[novel_mask][:n_dense])
+            )
+            
+            # sanity check
+            assert len(topk_candidate_idx) == self.topk
+            assert len(topk_candidate_idx) == len(set(topk_candidate_idx))
+
+            # compute the sparse scores from the embeddings
+            s_query_vec = self.s_query_embeds[query_idx, :]
+            s_dict_vec = self.s_dict_embeds[topk_candidate_idx, :]
+            candidate_s_scores = np.dot(s_query_vec, s_dict_vec.T).todense()[0]
+            candidate_s_scores = np.asarray(candidate_s_scores)
+
+            labels = self.get_labels(query_idx, topk_candidate_idx).astype(np.float32)
+            query_token = np.array(query_token).squeeze()
+            candidate_tokens = [self.all_dict_tokens[cand_idx][0] 
+                                    for cand_idx in topk_candidate_idx]
+            candidate_tokens = np.asarray(candidate_tokens)
+
+            self.examples[query_idx] = (
+                (query_token, candidate_tokens, candidate_s_scores), labels
+            )
+    
+    def __getitem__(self, query_idx):
+        return self.examples[query_idx]
 
     def __len__(self):
         return len(self.query_names)
@@ -207,10 +272,11 @@ class CandidateDataset(Dataset):
         return label
 
     def get_labels(self, query_idx, candidate_idxs):
-        labels = np.array([])
+        labels = []
         query_id = self.query_ids[query_idx]
-        candidate_ids = np.array(self.dict_ids)[candidate_idxs]
+        candidate_ids = self.dict_ids_ndarray[candidate_idxs]
         for candidate_id in candidate_ids:
             label = self.check_label(query_id, candidate_id)
-            labels = np.append(labels, label)
+            labels.append(label)
+        labels = np.asarray(labels)
         return labels
