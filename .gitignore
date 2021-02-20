@@ -44,3 +44,6 @@ biosyn.egg-info
 
 #semantic ui
 semantic
+*.tgz
+datasets/
+pretrained/
