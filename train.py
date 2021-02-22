@@ -127,12 +127,19 @@ def load_queries(data_dir, filter_composite, filter_duplicate):
     
     return dataset.data
 
-def train(args, data_loader, model):
+def train(args, data_loader, model, **kwargs):
     LOGGER.info("train!")
     
     train_loss = 0
     train_steps = 0
     model.train()
+    
+    save_embeds = False
+    
+    if 'save_embeds' in kwargs:
+        if kwargs['save_embeds'] is True:
+            save_embeds = True
+    
     for i, data in tqdm(enumerate(data_loader), total=len(data_loader)):
         model.optimizer.zero_grad()
         batch_x, batch_y = data
@@ -141,6 +148,19 @@ def train(args, data_loader, model):
         loss.backward()
         model.optimizer.step()
         train_loss += loss.item()
+        
+        # Save the embeddings for the current step
+        if save_embeds:
+            train_dict_dense_embeds = kwargs['biosyn'].embed_dense(
+                names=kwargs['names_in_train_dictionary'], show_progress=True
+            )
+            
+            embeds_dir = os.path.join(args.output_dir, "embeds_{}".format(kwargs['epoch']))
+            embeds_file_path = os.path.join(embeds_dir, str(train_steps) + '.npy')
+                
+            with open(embeds_file_path, 'wb') as embeds_file: 
+                np.save(embeds_file, train_dict_dense_embeds)
+
         train_steps += 1
 
     train_loss /= (train_steps + 1e-9)
@@ -239,6 +259,17 @@ def main(args):
         train_dict_dense_embeds = biosyn.embed_dense(
             names=names_in_train_dictionary, show_progress=True
         )
+        
+        save_embeds = True
+        
+        if save_embeds:
+            # Save the initially received dense embeddings
+            embeds_dir = os.path.join(args.output_dir, "embeds_{}".format(epoch))
+            os.makedirs(embeds_dir, exist_ok=True)
+            embeds_file_path = os.path.join(embeds_dir, 'initial.npy')
+                
+            with open(embeds_file_path, 'wb') as embeds_file: 
+                np.save(embeds_file, train_dict_dense_embeds)
 
         # get dense knn
         dense_knn = biosyn.get_dense_knn(
@@ -252,7 +283,15 @@ def main(args):
         train_set.set_dense_candidate_idxs(d_candidate_idxs=train_dense_candidate_idxs)
 
         # train
-        train_loss = train(args, data_loader=train_loader, model=model)
+        # Save dense embeddings for the current epoch into npy file
+        train_loss = train(
+            args, data_loader=train_loader, model=model,
+            save_embeds=save_embeds, epoch=epoch,
+            biosyn=biosyn,
+            names_in_train_queries=names_in_train_queries,
+            names_in_train_dictionary=names_in_train_dictionary,
+        )
+
         LOGGER.info('loss/train_per_epoch={}/{}'.format(train_loss,epoch))
         
         # save model every epoch
