@@ -22,4 +22,5 @@ python train.py \
     --initial_sparse_weight 0 \
     --learning_rate 1e-5 \
     --max_length 25 \
-    --dense_ratio 0.5
+    --dense_ratio 0.5 \
+    --save_embeds

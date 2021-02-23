@@ -69,6 +69,8 @@ def parse_args():
     parser.add_argument('--dense_ratio', type=float,
                         default=0.5)
     parser.add_argument('--save_checkpoint_all', action="store_true")
+    
+    parser.add_argument('--save_embeds', action="store_true")
 
     args = parser.parse_args()
     return args
@@ -134,12 +136,6 @@ def train(args, data_loader, model, **kwargs):
     train_steps = 0
     model.train()
     
-    save_embeds = False
-    
-    if 'save_embeds' in kwargs:
-        if kwargs['save_embeds'] is True:
-            save_embeds = True
-    
     for i, data in tqdm(enumerate(data_loader), total=len(data_loader)):
         model.optimizer.zero_grad()
         batch_x, batch_y = data
@@ -150,12 +146,15 @@ def train(args, data_loader, model, **kwargs):
         train_loss += loss.item()
         
         # Save the embeddings for the current step
-        if save_embeds:
+        if args.save_embeds:
+            LOGGER.info("Epoch {}/{} Step {}/{} embedding serialization".format(epoch, args.epoch, train_steps, len(data_loader)))
+
             train_dict_dense_embeds = kwargs['biosyn'].embed_dense(
                 names=kwargs['names_in_train_dictionary'], show_progress=True
             )
             
             embeds_dir = os.path.join(args.output_dir, "embeds_{}".format(kwargs['epoch']))
+
             embeds_file_path = os.path.join(embeds_dir, str(train_steps) + '.npy')
                 
             with open(embeds_file_path, 'wb') as embeds_file: 
@@ -260,9 +259,7 @@ def main(args):
             names=names_in_train_dictionary, show_progress=True
         )
         
-        save_embeds = True
-        
-        if save_embeds:
+        if args.save_embeds:
             # Save the initially received dense embeddings
             embeds_dir = os.path.join(args.output_dir, "embeds_{}".format(epoch))
             os.makedirs(embeds_dir, exist_ok=True)
@@ -286,7 +283,7 @@ def main(args):
         # Save dense embeddings for the current epoch into npy file
         train_loss = train(
             args, data_loader=train_loader, model=model,
-            save_embeds=save_embeds, epoch=epoch,
+            epoch=epoch,
             biosyn=biosyn,
             names_in_train_queries=names_in_train_queries,
             names_in_train_dictionary=names_in_train_dictionary,
