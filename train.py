@@ -152,7 +152,7 @@ def train(args, data_loader, model, **kwargs):
         
         # Save the embeddings for the current step
         if args.save_embeds:
-            LOGGER.info("Epoch {}/{} Step {}/{} embeddings serialization".format(epoch, args.epoch, train_steps, len(data_loader)))
+            LOGGER.info("Epoch {}/{} Step {}/{} embeddings serialization".format(kwargs['epoch'], args.epoch, train_steps, len(data_loader)))
 
             train_dict_dense_embeds = kwargs['biosyn'].embed_dense(
                 names=kwargs['names_in_train_dictionary'], show_progress=True
@@ -165,6 +165,9 @@ def train(args, data_loader, model, **kwargs):
                 
             with open(embeds_file_path, 'wb') as embeds_file: 
                 np.save(embeds_file, train_dict_dense_embeds)
+
+            with open(embeds_topk_path, 'wb') as embeds_topk:
+                np.save(embeds_topk, batch_topk_idxs)
 
         train_steps += 1
 
