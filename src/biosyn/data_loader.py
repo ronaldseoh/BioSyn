@@ -134,7 +134,8 @@ class CandidateDataset(Dataset):
                  d_ratio,
                  s_query_embeds,
                  s_dict_embeds,
-                 s_candidate_idxs):
+                 s_candidate_idxs,
+                 return_idxs=False):
         """
         Retrieve top-k candidates based on sparse/dense embedding
 
@@ -171,6 +172,8 @@ class CandidateDataset(Dataset):
         self.s_candidate_idxs = s_candidate_idxs
         self.d_candidate_idxs = None
         self.examples = {}
+        
+        self.return_idxs = return_idxs
 
         #tokenized_names_file = 'tokenized_names.medmentions.pkl'
         #if not os.path.exists(tokenized_names_file):
@@ -246,9 +249,14 @@ class CandidateDataset(Dataset):
                                     for cand_idx in topk_candidate_idx]
             candidate_tokens = np.asarray(candidate_tokens)
 
-            self.examples[query_idx] = (
-                (query_token, candidate_tokens, candidate_s_scores), labels
-            )
+            if self.return_idxs:
+                self.examples[query_idx] = (
+                    (query_token, candidate_tokens, candidate_s_scores), labels, topk_candidate_idx
+                )
+            else:
+                self.examples[query_idx] = (
+                    (query_token, candidate_tokens, candidate_s_scores), labels
+                )
     
     def __getitem__(self, query_idx):
         return self.examples[query_idx]
