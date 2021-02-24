@@ -138,8 +138,13 @@ def train(args, data_loader, model, **kwargs):
     
     for i, data in tqdm(enumerate(data_loader), total=len(data_loader)):
         model.optimizer.zero_grad()
-        batch_x, batch_y = data
-        batch_pred = model(batch_x)  
+        
+        if args.save_embeds:
+            batch_x, batch_y, batch_topk_idxs = data
+        else:
+            batch_x, batch_y = data
+
+        batch_pred = model(batch_x)
         loss = model.get_loss(batch_pred, batch_y)
         loss.backward()
         model.optimizer.step()
@@ -147,7 +152,7 @@ def train(args, data_loader, model, **kwargs):
         
         # Save the embeddings for the current step
         if args.save_embeds:
-            LOGGER.info("Epoch {}/{} Step {}/{} embedding serialization".format(epoch, args.epoch, train_steps, len(data_loader)))
+            LOGGER.info("Epoch {}/{} Step {}/{} embeddings serialization".format(epoch, args.epoch, train_steps, len(data_loader)))
 
             train_dict_dense_embeds = kwargs['biosyn'].embed_dense(
                 names=kwargs['names_in_train_dictionary'], show_progress=True
@@ -156,6 +161,7 @@ def train(args, data_loader, model, **kwargs):
             embeds_dir = os.path.join(args.output_dir, "embeds_{}".format(kwargs['epoch']))
 
             embeds_file_path = os.path.join(embeds_dir, str(train_steps) + '.npy')
+            embeds_topk_path = os.path.join(embeds_dir, str(train_steps) + '_topk.npy')
                 
             with open(embeds_file_path, 'wb') as embeds_file: 
                 np.save(embeds_file, train_dict_dense_embeds)
@@ -237,7 +243,8 @@ def main(args):
         d_ratio=args.dense_ratio,
         s_query_embeds=train_query_sparse_embeds,
         s_dict_embeds=train_dict_sparse_embeds,
-        s_candidate_idxs=train_sparse_candidate_idxs
+        s_candidate_idxs=train_sparse_candidate_idxs,
+        return_idxs=args.save_embeds # indexes of top-ks are needed for save_embeds
     )
     train_loader = torch.utils.data.DataLoader(
         train_set,
@@ -261,8 +268,12 @@ def main(args):
         
         if args.save_embeds:
             # Save the initially received dense embeddings
+            LOGGER.info("Epoch {}/{} initial embeddings serialization".format(epoch, args.epoch))
+            
             embeds_dir = os.path.join(args.output_dir, "embeds_{}".format(epoch))
+
             os.makedirs(embeds_dir, exist_ok=True)
+
             embeds_file_path = os.path.join(embeds_dir, 'initial.npy')
                 
             with open(embeds_file_path, 'wb') as embeds_file: 
