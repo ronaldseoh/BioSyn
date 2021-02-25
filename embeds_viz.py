@@ -81,47 +81,43 @@ np.save('num_neighbors_swapped_avg_history.npy', num_neighbors_swapped_avg_histo
 
 plt.figure()
 plt.xlabel('steps')
-plt.ylabel('Average embedding changes (within batch)')
+plt.ylabel('Average embedding changes')
 
-plt.plot(list(range(len(member_embeds_avg_change_history))), member_embeds_avg_change_history)
+plt.plot(
+    list(range(len(member_embeds_avg_change_history))),
+    member_embeds_avg_change_history,
+    label='within batch')
+    
+plt.plot(
+    list(range(len(nonmember_embeds_avg_change_history))),
+    nonmember_embeds_avg_change_history,
+    label='outside batch')
 
-plt.savefig('member_embeds_avg_change_history.png')
+plt.legend()
+plt.savefig('embeds_avg_change_history.png')
 plt.close()
 
 plt.figure()
 plt.xlabel('steps')
-plt.ylabel('Average embedding changes (outside batch)')
+plt.ylabel('# neighbors swapped (per query)')
 
-plt.plot(list(range(len(nonmember_embeds_avg_change_history))), nonmember_embeds_avg_change_history)
+plt.plot(
+    list(range(len(num_neighbors_swapped_avg_history))),
+    num_neighbors_swapped_avg_history,
+    label='avg')
+    
+plt.plot(
+    list(range(len(num_neighbors_swapped_max_history))),
+    num_neighbors_swapped_max_history,
+    label='max')
 
-plt.savefig('nonmember_embeds_avg_change_history.png')
-plt.close()
+plt.plot(
+    list(range(len(num_neighbors_swapped_min_history))),
+    num_neighbors_swapped_min_history,
+    label='min')
 
-plt.figure()
-plt.xlabel('steps')
-plt.ylabel('avg # neighbors swapped (per query)')
-
-plt.plot(list(range(len(num_neighbors_swapped_avg_history))), num_neighbors_swapped_avg_history)
-
-plt.savefig('num_neighbors_swapped_avg_history.png')
-plt.close()
-
-plt.figure()
-plt.xlabel('steps')
-plt.ylabel('min # neighbors swapped (per query)')
-
-plt.plot(list(range(len(num_neighbors_swapped_min_history))), num_neighbors_swapped_min_history)
-
-plt.savefig('num_neighbors_swapped_min_history.png')
-plt.close()
-
-plt.figure()
-plt.xlabel('steps')
-plt.ylabel('max # neighbors swapped (per query)')
-
-plt.plot(list(range(len(num_neighbors_swapped_max_history))), num_neighbors_swapped_max_history)
-
-plt.savefig('num_neighbors_swapped_max_history.png')
+plt.legend()
+plt.savefig('num_neighbors_swapped_history.png')
 plt.close()
 
 plt.figure()
