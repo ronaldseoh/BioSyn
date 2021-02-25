@@ -1,5 +1,5 @@
 import numpy as np
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 
 prev_embeds = np.load('initial.npy')
@@ -54,3 +54,32 @@ for i in range(150):
 np.save('member_embeds_avg_change_history.npy', member_embeds_avg_change_history)
 np.save('nonmember_embeds_avg_change_history.npy', nonmember_embeds_avg_change_history)
 np.save('num_members_swapped_avg_history.npy', num_members_swapped_avg_history)
+
+# Plot
+
+plt.figure()
+plt.xlabel('steps')
+plt.ylabel('Average embedding changes (within batch)')
+
+plt.plot(list(range(len(member_embeds_avg_change_history))), member_embeds_avg_change_history)
+
+plt.savefig('member_embeds_avg_change_history.png')
+plt.close()
+
+plt.figure()
+plt.xlabel('steps')
+plt.ylabel('Average embedding changes (outside batch)')
+
+plt.plot(list(range(len(nonmember_embeds_avg_change_history))), nonmember_embeds_avg_change_history)
+
+plt.savefig('nonmember_embeds_avg_change_history.png')
+plt.close()
+
+plt.figure()
+plt.xlabel('steps')
+plt.ylabel('# neighbors swapped (per query)')
+
+plt.plot(list(range(len(num_members_swapped_avg_history))), num_members_swapped_avg_history)
+
+plt.savefig('num_members_swapped_avg_history.png')
+plt.close()
