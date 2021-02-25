@@ -37,7 +37,7 @@ for i in range(150):
         nn_prev = set(prev_topk_by_queries[j])
         nn_cur = set(batch_topk_by_queries[j])
         
-        num_members_swapped_by_queries.append(len(nn_prev ^ nn_cur))
+        num_members_swapped_by_queries.append(len(nn_prev - nn_cur))
         
     num_members_swapped_avg = np.mean(num_members_swapped_by_queries)
     num_members_swapped_avg_history.append(num_members_swapped_avg)
