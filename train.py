@@ -158,16 +158,30 @@ def train(args, data_loader, model, **kwargs):
                 names=kwargs['names_in_train_dictionary'], show_progress=True
             )
             
+            # get dense knn
+            dense_knn = biosyn.get_dense_knn(
+                train_query_dense_embeds,
+                train_dict_dense_embeds,
+                args.topk
+            )
+
+            train_dense_candidate_idxs, _ = dense_knn
+            
             embeds_dir = os.path.join(args.output_dir, "embeds_{}".format(kwargs['epoch']))
 
             embeds_file_path = os.path.join(embeds_dir, str(train_steps) + '.npy')
             embeds_topk_path = os.path.join(embeds_dir, str(train_steps) + '_topk.npy')
+            
+            embeds_topk_by_queries_path = os.path.join(embeds_dir, str(train_steps) + '_topk_by_queries.npy')
                 
             with open(embeds_file_path, 'wb') as embeds_file: 
                 np.save(embeds_file, train_dict_dense_embeds)
 
             with open(embeds_topk_path, 'wb') as embeds_topk:
                 np.save(embeds_topk, batch_topk_idxs)
+
+            with open(embeds_topk_by_queries_path, 'wb') as embeds_topk_by_queries_file: 
+                np.save(embeds_topk_by_queries_file, train_dense_candidate_idxs)
 
         train_steps += 1
 
@@ -269,6 +283,15 @@ def main(args):
             names=names_in_train_dictionary, show_progress=True
         )
         
+        # get dense knn
+        dense_knn = biosyn.get_dense_knn(
+            train_query_dense_embeds,
+            train_dict_dense_embeds,
+            args.topk
+        )
+
+        train_dense_candidate_idxs, _ = dense_knn
+        
         if args.save_embeds:
             # Save the initially received dense embeddings
             LOGGER.info("Epoch {}/{} initial embeddings serialization".format(epoch, args.epoch))
@@ -278,17 +301,13 @@ def main(args):
             os.makedirs(embeds_dir, exist_ok=True)
 
             embeds_file_path = os.path.join(embeds_dir, 'initial.npy')
+            embeds_topk_by_queries_path = os.path.join(embeds_dir, 'initial_topk_by_queries.npy')
                 
             with open(embeds_file_path, 'wb') as embeds_file: 
                 np.save(embeds_file, train_dict_dense_embeds)
-
-        # get dense knn
-        dense_knn = biosyn.get_dense_knn(
-            train_query_dense_embeds,
-            train_dict_dense_embeds,
-            args.topk
-        )
-        train_dense_candidate_idxs, _ = dense_knn
+                
+            with open(embeds_topk_by_queries_path, 'wb') as embeds_topk_by_queries_file: 
+                np.save(embeds_topk_by_queries_file, train_dense_candidate_idxs)
 
         # replace dense candidates in the train_set
         train_set.set_dense_candidate_idxs(d_candidate_idxs=train_dense_candidate_idxs)
