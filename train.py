@@ -154,12 +154,16 @@ def train(args, data_loader, model, **kwargs):
         if args.save_embeds:
             LOGGER.info("Epoch {}/{} Step {}/{} embeddings serialization".format(kwargs['epoch'], args.epoch, train_steps, len(data_loader)))
 
+            train_query_dense_embeds = kwargs['biosyn'].embed_dense(
+                names=kwargs['names_in_train_queries'], show_progress=True
+            )
+
             train_dict_dense_embeds = kwargs['biosyn'].embed_dense(
                 names=kwargs['names_in_train_dictionary'], show_progress=True
             )
             
             # get dense knn
-            dense_knn = biosyn.get_dense_knn(
+            dense_knn = kwargs['biosyn'].get_dense_knn(
                 train_query_dense_embeds,
                 train_dict_dense_embeds,
                 args.topk
@@ -291,7 +295,7 @@ def main(args):
         )
 
         train_dense_candidate_idxs, _ = dense_knn
-        
+
         if args.save_embeds:
             # Save the initially received dense embeddings
             LOGGER.info("Epoch {}/{} initial embeddings serialization".format(epoch, args.epoch))
