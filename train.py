@@ -136,11 +136,17 @@ def train(args, data_loader, model, **kwargs):
     train_steps = 0
     model.train()
     
+    if args.save_embeds:
+        query_idx_order = []
+        embeds_dir = os.path.join(args.output_dir, "embeds_{}".format(kwargs['epoch']))
+    
     for i, data in tqdm(enumerate(data_loader), total=len(data_loader)):
         model.optimizer.zero_grad()
         
         if args.save_embeds:
             batch_x, batch_y, query_idx, batch_topk_idxs = data
+            
+            query_idx_order.append(query_idx)
         else:
             batch_x, batch_y = data
 
@@ -170,8 +176,6 @@ def train(args, data_loader, model, **kwargs):
             )
 
             train_dense_candidate_idxs, _ = dense_knn
-            
-            embeds_dir = os.path.join(args.output_dir, "embeds_{}".format(kwargs['epoch']))
 
             embeds_file_path = os.path.join(embeds_dir, str(train_steps) + '.npy')
             embeds_topk_path = os.path.join(embeds_dir, str(train_steps) + '_topk.npy')
@@ -188,6 +192,13 @@ def train(args, data_loader, model, **kwargs):
                 np.save(embeds_topk_by_queries_file, train_dense_candidate_idxs)
 
         train_steps += 1
+        
+    if args.save_embeds:
+        query_idx_order_path = os.path.join(embeds_dir, 'query_idx_order.npy')
+        
+        with open(query_idx_order_path, 'wb') as query_idx_file: 
+            np.save(query_idx_file, query_idx_order)
+        
 
     train_loss /= (train_steps + 1e-9)
     return train_loss
