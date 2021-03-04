@@ -6,7 +6,12 @@ prev_embeds = np.load('initial.npy')
 prev_topk_by_queries = np.load('initial_topk_by_queries.npy')
 
 member_embeds_avg_change_history = []
+member_embeds_min_change_history = []
+member_embeds_max_change_history = []
+
 nonmember_embeds_avg_change_history = []
+nonmember_embeds_min_change_history = []
+nonmember_embeds_max_change_history = []
 
 member_query_num_neighbors_swapped_avg_history = []
 member_query_num_neighbors_swapped_min_history = []
@@ -19,7 +24,7 @@ nonmember_query_num_neighbors_swapped_max_history = []
 member_query_neighbors_zero_change_count_history = []
 nonmember_query_neighbors_zero_change_count_history = []
 
-for i in range(50):
+for i in range(91):
     batch_members = set(np.load(str(i) + '_topk.npy').flatten())
     batch_embeds = np.load(str(i) + '.npy')
     batch_topk_by_queries = np.load(str(i) + '_topk_by_queries.npy')
@@ -37,10 +42,20 @@ for i in range(50):
             nonmember_embeds_changes.append(changes[j])
     
     member_embeds_changes_avg = np.mean(member_embeds_changes)
-    nonmember_embeds_changes_avg = np.mean(nonmember_embeds_changes)
+    member_embeds_changes_min = np.min(member_embeds_changes)
+    member_embeds_changes_max = np.max(member_embeds_changes)
     
     member_embeds_avg_change_history.append(member_embeds_changes_avg)
+    member_embeds_min_change_history.append(member_embeds_changes_min)
+    member_embeds_max_change_history.append(member_embeds_changes_max)
+
+    nonmember_embeds_changes_avg = np.mean(nonmember_embeds_changes)
+    nonmember_embeds_changes_min = np.min(nonmember_embeds_changes)
+    nonmember_embeds_changes_max = np.max(nonmember_embeds_changes)
+    
     nonmember_embeds_avg_change_history.append(nonmember_embeds_changes_avg)
+    nonmember_embeds_min_change_history.append(nonmember_embeds_changes_min)
+    nonmember_embeds_max_change_history.append(nonmember_embeds_changes_max)
     
     member_query_num_neighbors_swapped = []
     nonmember_query_num_neighbors_swapped = []
@@ -85,20 +100,33 @@ for i in range(50):
 
     member_query_neighbors_zero_change_count_history.append(member_query_zero_neighbors_change_count / len(batch_query_idxs))
     nonmember_query_neighbors_zero_change_count_history.append(nonmember_query_zero_neighbors_change_count / (len(batch_topk_by_queries) - len(batch_query_idxs)))
+
+    print("Batch %d:" % i)
+    print()
     
     print("Member embedding avg change =", member_embeds_changes_avg)
+    print("Member embedding min change =", member_embeds_changes_min)
+    print("Member embedding max change =", member_embeds_changes_max)
+    print()
+    
     print("Non-member embedding avg change =", nonmember_embeds_changes_avg)
+    print("Non-member embedding min change =", nonmember_embeds_changes_min)
+    print("Non-member embedding max change =", nonmember_embeds_changes_max)
+    print()
 
     print("Avg. # of neighbors swapped per query in the batch =", member_query_num_neighbors_swapped_avg)
     print("Min # of neighbors swapped per query in the batch =", member_query_num_neighbors_swapped_min)
     print("Max # of neighbors swapped per query in the batch =", member_query_num_neighbors_swapped_max)
+    print()
     
     print("Avg. # of neighbors swapped per query NOT in the batch =", nonmember_query_num_neighbors_swapped_avg)
     print("Min # of neighbors swapped per query NOT in the batch =", nonmember_query_num_neighbors_swapped_min)
     print("Max # of neighbors swapped per query NOT in the batch =", nonmember_query_num_neighbors_swapped_max)
+    print()
 
     print("# of zero neighbor changes for query in the batch =", member_query_zero_neighbors_change_count, "out of", len(batch_query_idxs))
     print("# of zero neighbor changes for query NOT in the batch =", nonmember_query_zero_neighbors_change_count, "out of", len(batch_topk_by_queries) - len(batch_query_idxs))
+    print()
     
     print()
     
@@ -107,10 +135,10 @@ for i in range(50):
 
 # Plot
 
-# Average embeddings of dense representations in the dictionary
+# Average embedding changes of dense representations in the dictionary
 plt.figure()
 plt.xlabel('steps')
-plt.ylabel('Average embedding changes')
+plt.ylabel('Average embedding changes (L2 distance)')
 
 plt.plot(
     list(range(len(member_embeds_avg_change_history))),
@@ -126,6 +154,53 @@ plt.legend()
 plt.savefig('embeds_avg_change_history.png')
 plt.close()
 
+# Stats for embeddings changes of dense representations in the dictionary within batch
+plt.figure()
+plt.xlabel('steps')
+plt.ylabel('embedding changes (L2 distance)')
+
+plt.plot(
+    list(range(len(member_embeds_avg_change_history))),
+    member_embeds_avg_change_history,
+    label='avg')
+    
+plt.plot(
+    list(range(len(member_embeds_max_change_history))),
+    member_embeds_max_change_history,
+    label='max')
+
+plt.plot(
+    list(range(len(member_embeds_min_change_history))),
+    member_embeds_min_change_history,
+    label='min')
+
+plt.legend()
+plt.savefig('member_embeds_change_history.png')
+plt.close()
+
+# Stats for embeddings changes of dense representations in the dictionary OUTSIDE batch
+plt.figure()
+plt.xlabel('steps')
+plt.ylabel('embedding changes (L2 distance)')
+
+plt.plot(
+    list(range(len(nonmember_embeds_avg_change_history))),
+    nonmember_embeds_avg_change_history,
+    label='avg')
+    
+plt.plot(
+    list(range(len(nonmember_embeds_max_change_history))),
+    nonmember_embeds_max_change_history,
+    label='max')
+
+plt.plot(
+    list(range(len(nonmember_embeds_min_change_history))),
+    nonmember_embeds_min_change_history,
+    label='min')
+
+plt.legend()
+plt.savefig('nonmember_embeds_change_history.png')
+plt.close()
 
 # Number of neighbors swapped per query (within batch)
 plt.figure()
