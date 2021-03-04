@@ -296,7 +296,7 @@ def main(args):
             os.makedirs(embeds_dir, exist_ok=True)
 
             np.save(os.path.join(embeds_dir, 'initial.npy'), train_dict_dense_embeds)
-            np.save(os.path.join(embeds_dir, 'initial_query_embeds.npy'), train_dict_dense_embeds)
+            np.save(os.path.join(embeds_dir, 'initial_query_embeds.npy'), train_query_dense_embeds)
             np.save(os.path.join(embeds_dir, 'initial_topk_by_queries.npy'), train_dense_candidate_idxs)
 
         # replace dense candidates in the train_set
