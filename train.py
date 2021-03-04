@@ -140,7 +140,7 @@ def train(args, data_loader, model, **kwargs):
         model.optimizer.zero_grad()
         
         if args.save_embeds:
-            batch_x, batch_y, batch_topk_idxs = data
+            batch_x, batch_y, query_idx, batch_topk_idxs = data
         else:
             batch_x, batch_y = data
 

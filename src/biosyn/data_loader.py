@@ -251,7 +251,7 @@ class CandidateDataset(Dataset):
 
             if self.return_idxs:
                 self.examples[query_idx] = (
-                    (query_token, candidate_tokens, candidate_s_scores), labels, topk_candidate_idx
+                    (query_token, candidate_tokens, candidate_s_scores), labels, query_idx, topk_candidate_idx
                 )
             else:
                 self.examples[query_idx] = (
