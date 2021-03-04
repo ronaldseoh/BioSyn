@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -234,6 +236,11 @@ for i in range(60):
 
 # Plot
 
+# Create a directory for plots
+plots_dir = os.path.join("__plots")
+
+os.makedirs(plots_dir, exist_ok=True)
+
 # Average embedding changes of dense representations in the dictionary
 plt.figure()
 plt.xlabel('steps')
@@ -250,7 +257,7 @@ plt.plot(
     label='outside batch')
 
 plt.legend()
-plt.savefig('embeds_avg_change_history.png')
+plt.savefig(os.path.join(plots_dir, 'embeds_avg_change_history.png'))
 plt.close()
 
 # Stats for embeddings changes of dense representations in the dictionary within batch
@@ -274,7 +281,7 @@ plt.plot(
     label='min')
 
 plt.legend()
-plt.savefig('member_embeds_change_history.png')
+plt.savefig(os.path.join(plots_dir, 'member_embeds_change_history.png'))
 plt.close()
 
 # Stats for embeddings changes of dense representations in the dictionary OUTSIDE batch
@@ -298,7 +305,7 @@ plt.plot(
     label='min')
 
 plt.legend()
-plt.savefig('nonmember_embeds_change_history.png')
+plt.savefig(os.path.join(plots_dir, 'nonmember_embeds_change_history.png'))
 plt.close()
 
 # Number of neighbors swapped per query (within batch)
@@ -322,7 +329,7 @@ plt.plot(
     label='min')
 
 plt.legend()
-plt.savefig('member_query_num_neighbors_swapped_history.png')
+plt.savefig(os.path.join(plots_dir, 'member_query_num_neighbors_swapped_history.png'))
 plt.close()
 
 # Number of neighbors swapped per query (OUTSIDE batch)
@@ -346,7 +353,7 @@ plt.plot(
     label='min')
 
 plt.legend()
-plt.savefig('nonmember_query_num_neighbors_swapped_history.png')
+plt.savefig(os.path.join(plots_dir, 'nonmember_query_num_neighbors_swapped_history.png'))
 plt.close()
 
 # Proportion of queries with ZERO neighbor changes (in/out batch)
@@ -365,7 +372,7 @@ plt.plot(
     label='queries NOT in batch')
 
 plt.legend()
-plt.savefig('zero_neighbors_change_count_history.png')
+plt.savefig(os.path.join(plots_dir, 'zero_neighbors_change_count_history.png'))
 plt.close()
 
 # Nearest distance per query (within batch)
@@ -389,7 +396,7 @@ plt.plot(
     label='min')
 
 plt.legend()
-plt.savefig('member_query_nearest_distance_history.png')
+plt.savefig(os.path.join(plots_dir, 'member_query_nearest_distance_history.png'))
 plt.close()
 
 # Nearest distance per query (outside batch)
@@ -413,7 +420,7 @@ plt.plot(
     label='min')
 
 plt.legend()
-plt.savefig('nonmember_query_nearest_distance_history.png')
+plt.savefig(os.path.join(plots_dir, 'nonmember_query_nearest_distance_history.png'))
 plt.close()
 
 # query embed changes per query (within batch)
@@ -437,7 +444,7 @@ plt.plot(
     label='min')
 
 plt.legend()
-plt.savefig('member_query_embed_change_history.png')
+plt.savefig(os.path.join(plots_dir, 'member_query_embed_change_history.png'))
 plt.close()
 
 # query embed changes per query (outside batch)
@@ -461,7 +468,7 @@ plt.plot(
     label='min')
 
 plt.legend()
-plt.savefig('nonmember_query_embed_change_history.png')
+plt.savefig(os.path.join(plots_dir, 'nonmember_query_embed_change_history.png'))
 plt.close()
 
 # avg distance change + avg query embed change
@@ -469,18 +476,18 @@ plt.figure()
 plt.xlabel('avg distance to the nearest neighbor')
 plt.ylabel('avg query embed change')
 
-plt.plot(
+plt.scatter(
     member_query_nearest_distance_avg_history,
     member_query_embed_change_avg_history,
     label='queries in batch')
     
-plt.plot(
+plt.scatter(
     nonmember_query_nearest_distance_avg_history,
     nonmember_query_embed_change_avg_history,
     label='queries NOT in batch')
 
 plt.legend()
-plt.savefig('nearest_distance_query_embed_change_history.png')
+plt.savefig(os.path.join(plots_dir, 'nearest_distance_query_embed_change_history.png'))
 plt.close()
 
 # avg distance change + number of neighbors changed
@@ -488,16 +495,16 @@ plt.figure()
 plt.xlabel('avg distance to the nearest neighbor')
 plt.ylabel('avg number of neighbors changed')
 
-plt.plot(
+plt.scatter(
     member_query_nearest_distance_avg_history,
     member_query_num_neighbors_swapped_avg_history,
     label='queries in batch')
     
-plt.plot(
+plt.scatter(
     nonmember_query_nearest_distance_avg_history,
     nonmember_query_num_neighbors_swapped_avg_history,
     label='queries NOT in batch')
 
 plt.legend()
-plt.savefig('nearest_distance_num_neighbors_swapped_history.png')
+plt.savefig(os.path.join(plots_dir, 'nearest_distance_num_neighbors_swapped_history.png'))
 plt.close()
