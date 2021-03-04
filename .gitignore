@@ -47,3 +47,4 @@ semantic
 *.tgz
 datasets/
 pretrained/
+.DS_Store
