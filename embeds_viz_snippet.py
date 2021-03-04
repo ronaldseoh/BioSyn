@@ -11,12 +11,15 @@ nonmember_embeds_avg_change_history = []
 num_neighbors_swapped_avg_history = []
 num_neighbors_swapped_min_history = []
 num_neighbors_swapped_max_history = []
-no_neighbors_change_count_history = []
 
-for i in range(150):
+member_query_neighbors_zero_change_count_history = []
+nonmember_query_neighbors_zero_change_count_history = []
+
+for i in range(25):
     batch_members = set(np.load(str(i) + '_topk.npy').flatten())
     batch_embeds = np.load(str(i) + '.npy')
     batch_topk_by_queries = np.load(str(i) + '_topk_by_queries.npy')
+    batch_query_idxs = np.load(str(i) + '_query_idx.npy')
     
     member_embeds_changes = []
     nonmember_embeds_changes = []
@@ -37,7 +40,8 @@ for i in range(150):
     
     num_neighbors_swapped_by_queries = []
     
-    no_neighbors_change_count = 0
+    member_query_zero_neighbors_change_count = 0
+    nonmember_query_zero_neighbors_change_count = 0
     
     for j in range(len(batch_topk_by_queries)):
         nn_prev = set(prev_topk_by_queries[j])
@@ -48,7 +52,10 @@ for i in range(150):
         num_neighbors_swapped_by_queries.append(num_swapped)
         
         if num_swapped == 0:
-            no_neighbors_change_count = no_neighbors_change_count + 1
+            if j in batch_query_idxs:
+                member_query_zero_neighbors_change_count = member_query_zero_neighbors_change_count + 1
+            else:
+                nonmember_query_zero_neighbors_change_count = nonmember_query_zero_neighbors_change_count + 1
         
     num_neighbors_swapped_avg = np.mean(num_neighbors_swapped_by_queries)
     num_neighbors_swapped_avg_history.append(num_neighbors_swapped_avg)
@@ -59,14 +66,18 @@ for i in range(150):
     num_neighbors_swapped_max = np.max(num_neighbors_swapped_by_queries)
     num_neighbors_swapped_max_history.append(num_neighbors_swapped_max)
 
-    no_neighbors_change_count_history.append(no_neighbors_change_count)
+    member_query_neighbors_zero_change_count_history.append(member_query_zero_neighbors_change_count / len(batch_query_idxs))
+    nonmember_query_neighbors_zero_change_count_history.append(nonmember_query_zero_neighbors_change_count / (len(batch_topk_by_queries) - len(batch_query_idxs)))
     
     print("Member embedding avg change =", member_embeds_changes_avg)
     print("Non-member embedding avg change =", nonmember_embeds_changes_avg)
+
     print("Avg. # of neighbors swapped per query =", num_neighbors_swapped_avg)
     print("Min # of neighbors swapped per query =", num_neighbors_swapped_min)
     print("Max # of neighbors swapped per query =", num_neighbors_swapped_max)
-    print("# of no neighbor changes=", no_neighbors_change_count, "out of", len(batch_topk_by_queries))
+
+    print("# of zero neighbor changes for query in the batch =", member_query_zero_neighbors_change_count, "out of", len(batch_query_idxs))
+    print("# of zero neighbor changes for query NOT in the batch =", nonmember_query_zero_neighbors_change_count, "out of", len(batch_topk_by_queries) - len(batch_query_idxs))
     
     print()
     
@@ -122,9 +133,18 @@ plt.close()
 
 plt.figure()
 plt.xlabel('steps')
-plt.ylabel('# of no neighbor changes')
+plt.ylabel('# of ZERO neighbor changes')
 
-plt.plot(list(range(len(no_neighbors_change_count_history))), no_neighbors_change_count_history)
+plt.plot(
+    list(range(len(member_query_neighbors_zero_change_count_history))),
+    member_query_neighbors_zero_change_count_history,
+    label='queries in batch')
+    
+plt.plot(
+    list(range(len(nonmember_query_neighbors_zero_change_count_history))),
+    nonmember_query_neighbors_zero_change_count_history,
+    label='queries NOT in batch')
 
-plt.savefig('no_neighbors_change_count_history.png')
+plt.legend()
+plt.savefig('zero_neighbors_change_count_history.png')
 plt.close()
