@@ -194,10 +194,6 @@ def train(args, data_loader, model, **kwargs):
                 np.save(query_idx_file, query_idx)
 
         train_steps += 1
-        
-    if args.save_embeds:
-
-        
 
     train_loss /= (train_steps + 1e-9)
     return train_loss
