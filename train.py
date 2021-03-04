@@ -157,41 +157,25 @@ def train(args, data_loader, model, **kwargs):
         if args.save_embeds:
             LOGGER.info("Epoch {}/{} Step {}/{} embeddings serialization".format(kwargs['epoch'], args.epoch, train_steps, len(data_loader)))
 
+            # Dense embeddings of the training queries
             train_query_dense_embeds = kwargs['biosyn'].embed_dense(
-                names=kwargs['names_in_train_queries'], show_progress=True
-            )
+                names=kwargs['names_in_train_queries'], show_progress=True)
 
+            # Dense embeddings of the training dictionary
             train_dict_dense_embeds = kwargs['biosyn'].embed_dense(
-                names=kwargs['names_in_train_dictionary'], show_progress=True
-            )
+                names=kwargs['names_in_train_dictionary'], show_progress=True)
             
-            # get dense knn
-            dense_knn = kwargs['biosyn'].get_dense_knn(
+            # get dense nearest neighbors
+            train_dense_candidate_idxs, _  = kwargs['biosyn'].get_dense_knn(
                 train_query_dense_embeds,
                 train_dict_dense_embeds,
-                args.topk
-            )
-
-            train_dense_candidate_idxs, _ = dense_knn
-
-            embeds_file_path = os.path.join(embeds_dir, str(train_steps) + '.npy')
-            embeds_topk_path = os.path.join(embeds_dir, str(train_steps) + '_topk.npy')
+                args.topk)
             
-            embeds_topk_by_queries_path = os.path.join(embeds_dir, str(train_steps) + '_topk_by_queries.npy')
-            
-            query_idx_path = os.path.join(embeds_dir, str(train_steps) + '_query_idx.npy')
-                
-            with open(embeds_file_path, 'wb') as embeds_file: 
-                np.save(embeds_file, train_dict_dense_embeds)
-
-            with open(embeds_topk_path, 'wb') as embeds_topk:
-                np.save(embeds_topk, batch_topk_idxs)
-
-            with open(embeds_topk_by_queries_path, 'wb') as embeds_topk_by_queries_file: 
-                np.save(embeds_topk_by_queries_file, train_dense_candidate_idxs)
-                
-            with open(query_idx_path, 'wb') as query_idx_file: 
-                np.save(query_idx_file, query_idx)
+            # Save to the given path
+            np.save(os.path.join(embeds_dir, str(train_steps) + '.npy'), train_dict_dense_embeds)
+            np.save(os.path.join(embeds_dir, str(train_steps) + '_topk.npy'), batch_topk_idxs)
+            np.save(os.path.join(embeds_dir, str(train_steps) + '_topk_by_queries.npy'), train_dense_candidate_idxs)
+            np.save(os.path.join(embeds_dir, str(train_steps) + '_query_idx.npy'), query_idx)
 
         train_steps += 1
 
@@ -310,14 +294,8 @@ def main(args):
 
             os.makedirs(embeds_dir, exist_ok=True)
 
-            embeds_file_path = os.path.join(embeds_dir, 'initial.npy')
-            embeds_topk_by_queries_path = os.path.join(embeds_dir, 'initial_topk_by_queries.npy')
-                
-            with open(embeds_file_path, 'wb') as embeds_file: 
-                np.save(embeds_file, train_dict_dense_embeds)
-                
-            with open(embeds_topk_by_queries_path, 'wb') as embeds_topk_by_queries_file: 
-                np.save(embeds_topk_by_queries_file, train_dense_candidate_idxs)
+            np.save(os.path.join(embeds_dir, 'initial.npy'), train_dict_dense_embeds)
+            np.save(os.path.join(embeds_dir, 'initial_topk_by_queries.npy'), train_dense_candidate_idxs)
 
         # replace dense candidates in the train_set
         train_set.set_dense_candidate_idxs(d_candidate_idxs=train_dense_candidate_idxs)
