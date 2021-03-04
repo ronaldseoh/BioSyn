@@ -173,6 +173,7 @@ def train(args, data_loader, model, **kwargs):
             
             # Save to the given path
             np.save(os.path.join(embeds_dir, str(train_steps) + '.npy'), train_dict_dense_embeds)
+            np.save(os.path.join(embeds_dir, str(train_steps) + '_query_embeds.npy'), train_query_dense_embeds)
             np.save(os.path.join(embeds_dir, str(train_steps) + '_topk.npy'), batch_topk_idxs)
             np.save(os.path.join(embeds_dir, str(train_steps) + '_topk_by_queries.npy'), train_dense_candidate_idxs)
             np.save(os.path.join(embeds_dir, str(train_steps) + '_query_idx.npy'), query_idx)
@@ -295,6 +296,7 @@ def main(args):
             os.makedirs(embeds_dir, exist_ok=True)
 
             np.save(os.path.join(embeds_dir, 'initial.npy'), train_dict_dense_embeds)
+            np.save(os.path.join(embeds_dir, 'initial_query_embeds.npy'), train_dict_dense_embeds)
             np.save(os.path.join(embeds_dir, 'initial_topk_by_queries.npy'), train_dense_candidate_idxs)
 
         # replace dense candidates in the train_set
