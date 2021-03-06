@@ -71,6 +71,10 @@ def parse_args():
     parser.add_argument('--save_checkpoint_all', action="store_true")
     
     parser.add_argument('--save_embeds', action="store_true")
+    
+    parser.add_argument('--dense_refresh_interval',
+                        help='how often we should rebuild dense embeddings, in terms of training steps?',
+                        default=-1, type=int)
 
     args = parser.parse_args()
     return args
@@ -153,30 +157,34 @@ def train(args, data_loader, model, **kwargs):
         model.optimizer.step()
         train_loss += loss.item()
         
-        # Save the embeddings for the current step
-        if args.save_embeds:
-            LOGGER.info("Epoch {}/{} Step {}/{} embeddings serialization".format(kwargs['epoch'], args.epoch, train_steps, len(data_loader)))
+        # rebuidling dense embeddings
+        if args.save_embeds or args.dense_refresh_interval > 0:
+            if i % args.dense_refresh_interval == 0:
+                LOGGER.info(
+                    "Epoch {}/{} Step {}/{} embeddings refresh".format(
+                        kwargs['epoch'], args.epoch, train_steps, len(data_loader)))
 
-            # Dense embeddings of the training queries
-            train_query_dense_embeds = kwargs['biosyn'].embed_dense(
-                names=kwargs['names_in_train_queries'], show_progress=True)
+                # Dense embeddings of the training queries
+                train_query_dense_embeds = kwargs['biosyn'].embed_dense(
+                    names=kwargs['names_in_train_queries'], show_progress=True)
 
-            # Dense embeddings of the training dictionary
-            train_dict_dense_embeds = kwargs['biosyn'].embed_dense(
-                names=kwargs['names_in_train_dictionary'], show_progress=True)
-            
-            # get dense nearest neighbors
-            train_dense_candidate_idxs, _  = kwargs['biosyn'].get_dense_knn(
-                train_query_dense_embeds,
-                train_dict_dense_embeds,
-                args.topk)
-            
-            # Save to the given path
-            np.save(os.path.join(embeds_dir, str(train_steps) + '.npy'), train_dict_dense_embeds)
-            np.save(os.path.join(embeds_dir, str(train_steps) + '_query_embeds.npy'), train_query_dense_embeds)
-            np.save(os.path.join(embeds_dir, str(train_steps) + '_topk.npy'), batch_topk_idxs)
-            np.save(os.path.join(embeds_dir, str(train_steps) + '_topk_by_queries.npy'), train_dense_candidate_idxs)
-            np.save(os.path.join(embeds_dir, str(train_steps) + '_query_idx.npy'), query_idx)
+                # Dense embeddings of the training dictionary
+                train_dict_dense_embeds = kwargs['biosyn'].embed_dense(
+                    names=kwargs['names_in_train_dictionary'], show_progress=True)
+                
+                # get dense nearest neighbors
+                train_dense_candidate_idxs, _  = kwargs['biosyn'].get_dense_knn(
+                    train_query_dense_embeds,
+                    train_dict_dense_embeds,
+                    args.topk)
+        
+                if args.save_embeds:
+                    # Save to the given path
+                    np.save(os.path.join(embeds_dir, str(train_steps) + '.npy'), train_dict_dense_embeds)
+                    np.save(os.path.join(embeds_dir, str(train_steps) + '_query_embeds.npy'), train_query_dense_embeds)
+                    np.save(os.path.join(embeds_dir, str(train_steps) + '_topk.npy'), batch_topk_idxs)
+                    np.save(os.path.join(embeds_dir, str(train_steps) + '_topk_by_queries.npy'), train_dense_candidate_idxs)
+                    np.save(os.path.join(embeds_dir, str(train_steps) + '_query_idx.npy'), query_idx)
 
         train_steps += 1
 
