@@ -264,7 +264,7 @@ def main(args):
         s_query_embeds=train_query_sparse_embeds,
         s_dict_embeds=train_dict_sparse_embeds,
         s_candidate_idxs=train_sparse_candidate_idxs,
-        return_idxs=args.save_embeds # indexes of top-ks are needed for save_embeds
+        return_idxs=args.save_embeds or args.dense_refresh_interval > -1 # indexes of queries and candidates
     )
     train_loader = torch.utils.data.DataLoader(
         train_set,
