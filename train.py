@@ -157,11 +157,11 @@ def train(args, data_loader, model, **kwargs):
         model.optimizer.step()
         train_loss += loss.item()
         
-        # rebuidling dense embeddings
-        if args.save_embeds or args.dense_refresh_interval > 0:
+        # rebuilding dense embeddings
+        if args.dense_refresh_interval > 0:
             if i % args.dense_refresh_interval == 0:
                 LOGGER.info(
-                    "Epoch {}/{} Step {}/{} embeddings refresh".format(
+                    "Step {}/{} dense embeddings refresh".format(
                         kwargs['epoch'], args.epoch, train_steps, len(data_loader)))
 
                 # Dense embeddings of the training queries
@@ -177,14 +177,52 @@ def train(args, data_loader, model, **kwargs):
                     train_query_dense_embeds,
                     train_dict_dense_embeds,
                     args.topk)
-        
+
                 if args.save_embeds:
+                    LOGGER.info(
+                        "Step {}/{} dense embeddings serialization".format(
+                            kwargs['epoch'], args.epoch, train_steps, len(data_loader)))
+
                     # Save to the given path
                     np.save(os.path.join(embeds_dir, str(train_steps) + '.npy'), train_dict_dense_embeds)
                     np.save(os.path.join(embeds_dir, str(train_steps) + '_query_embeds.npy'), train_query_dense_embeds)
                     np.save(os.path.join(embeds_dir, str(train_steps) + '_topk.npy'), batch_topk_idxs)
                     np.save(os.path.join(embeds_dir, str(train_steps) + '_topk_by_queries.npy'), train_dense_candidate_idxs)
                     np.save(os.path.join(embeds_dir, str(train_steps) + '_query_idx.npy'), query_idx)
+                    
+                # Inject the new dense candidates into the training dataset
+                
+                # Sanity check
+                print("Sanity check for dense candidate injection:")
+                
+                # select one query randomly from the batch
+                some_query_in_batch = np.random.choice(query_idx)
+                some_query_outside_batch = np.random.choice(
+                    list(set(range(len(train_query_dense_embeds))) - set(query_idx)))
+                    
+                print("BEFORE - candidates for the query %d (in the batch)" % some_query_in_batch)
+                
+                print(data_loader.datset.d_candidate_idxs[some_query_in_batch])
+                
+                print()
+                
+                print("BEFORE - candidates for the query %d (outside the batch)" % some_query_outside_batch)
+                
+                print(data_loader.datset.d_candidate_idxs[some_query_outside_batch])
+                
+                print()
+                
+                data_loader.dataset.set_dense_candidate_idxs(d_candidate_idxs=train_dense_candidate_idxs)
+                
+                print("AFTER - candidates for the query %d (in the batch)" % some_query_in_batch)
+                
+                print(data_loader.datset.d_candidate_idxs[some_query_in_batch])
+                
+                print()
+                
+                print("AFTER - candidates for the query %d (outside the batch)" % some_query_outside_batch)
+                
+                print(data_loader.datset.d_candidate_idxs[some_query_outside_batch])
 
         train_steps += 1
 
@@ -297,7 +335,7 @@ def main(args):
 
         if args.save_embeds:
             # Save the initially received dense embeddings
-            LOGGER.info("Epoch {}/{} initial embeddings serialization".format(epoch, args.epoch))
+            LOGGER.info("initial embeddings serialization")
             
             embeds_dir = os.path.join(args.output_dir, "embeds_{}".format(epoch))
 
