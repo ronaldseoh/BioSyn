@@ -186,10 +186,6 @@ def train(args, data_loader, model, **kwargs):
                     # All candidates indexes by queries
                     train_dense_candidate_idxs = copy.deepcopy(prev_train_dense_candidate_idxs)
 
-                    # rebuild query embeddings just for the in-batch queries
-                    new_batch_query_dense_embeds = kwargs['biosyn'].embed_dense(
-                        names=kwargs['names_in_train_queries'][query_idx], show_progress=True)
-                        
                     # Find out-batch queries that are close to in-batch queries
                     nearby_queries = torch.Tensor([])
                     
@@ -203,8 +199,15 @@ def train(args, data_loader, model, **kwargs):
                         nearby_queries = torch.topk(
                             cosine_similarities, k=args.dense_refresh_batch_and_nearby,
                             dim=1).indices.flatten()
+                            
+                    # query ids of all the queries we need to work on
+                    rebuild_query_ids = torch.cat([query_idx, nearby_queries])
+                            
+                    # rebuild query embeddings for the ones in rebuild_query_ids
+                    new_batch_query_dense_embeds = kwargs['biosyn'].embed_dense(
+                        names=kwargs['names_in_train_queries'][rebuild_query_ids], show_progress=True)
 
-                    for i, q_id in enumerate(torch.cat(query_idx, nearby_queries)):
+                    for i, q_id in enumerate(rebuild_query_ids):
                         # Inject this query's embedding
                         train_query_dense_embeds[q_id] = new_batch_query_dense_embeds[i]
                         
