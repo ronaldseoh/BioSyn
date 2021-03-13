@@ -211,7 +211,7 @@ def train(args, data_loader, model, **kwargs):
                         # Inject this query's embedding
                         train_query_dense_embeds[q_id] = new_batch_query_dense_embeds[i]
                         
-                        current_query_neighbors = batch_topk_idxs[i]
+                        current_query_neighbors = data_loader.dataset[q_id][3]
                         
                         # Rebuild just the embeddings of this query's neighbors
                         new_batch_dict_dense_embeds = kwargs['biosyn'].embed_dense(
