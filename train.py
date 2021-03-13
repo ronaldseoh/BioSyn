@@ -9,6 +9,8 @@ import os
 import json
 import random
 import pickle
+import sklearn.metrics
+
 from utils import (
     evaluate
 )
@@ -189,18 +191,20 @@ def train(args, data_loader, model, **kwargs):
                         names=kwargs['names_in_train_queries'][query_idx], show_progress=True)
                         
                     # Find out-batch queries that are close to in-batch queries
-                    nearby_queries = []
+                    nearby_queries = torch.Tensor([])
                     
                     if args.dense_refresh_batch_and_nearby >= 1:
-                        nearby_query_idxs, _  = kwargs['biosyn'].get_dense_knn(
-                            prev_train_query_dense_embeds,
-                            prev_train_query_dense_embeds,
-                            args.dense_refresh_batch_and_nearby)
+                        cosine_similarities = sklearn.metrics.pairwise.cosine_similarity(
+                            prev_train_query_dense_embeds[query_idx],
+                            prev_train_query_dense_embeds)
                             
-                        for q_id in query_idx:
-                            nearby_queries = nearby_queries + nearby_query_idxs[q_id]
+                        cosine_similarities = torch.Tensor(cosine_similarities)
+                        
+                        nearby_queries = torch.topk(
+                            cosine_similarities, k=args.dense_refresh_batch_and_nearby,
+                            dim=1).indices.flatten()
 
-                    for i, q_id in enumerate(query_idx + nearby_queries):
+                    for i, q_id in enumerate(torch.cat(query_idx, nearby_queries)):
                         # Inject this query's embedding
                         train_query_dense_embeds[q_id] = new_batch_query_dense_embeds[i]
                         
