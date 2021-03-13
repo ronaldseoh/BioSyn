@@ -75,6 +75,10 @@ def parse_args():
     parser.add_argument('--dense_refresh_interval',
                         help='how often we should rebuild dense embeddings, in terms of training steps?',
                         default=-1, type=int)
+                        
+    parser.add_argument('--dense_refresh_batch_and_nearby',
+                        help='refresh embeddings of ',
+                        default=-1, type=int)
 
     args = parser.parse_args()
     return args
@@ -142,6 +146,11 @@ def train(args, data_loader, model, **kwargs):
     
     if args.save_embeds:
         embeds_dir = os.path.join(args.output_dir, "embeds_{}".format(kwargs['epoch']))
+        
+    if args.dense_refresh_batch_and_nearby >= 0:
+        prev_train_query_dense_embeds = kwargs['train_query_dense_embeds']
+        prev_train_dict_dense_embeds = kwargs['train_dict_dense_embeds']
+        prev_train_dense_candidate_idxs = kwargs['train_dense_candidate_idxs']
     
     for i, data in tqdm(enumerate(data_loader), total=len(data_loader)):
         model.optimizer.zero_grad()
@@ -163,20 +172,67 @@ def train(args, data_loader, model, **kwargs):
                 LOGGER.info(
                     "Step {}/{} dense embeddings refresh".format(
                         kwargs['epoch'], args.epoch, train_steps, len(data_loader)))
+                        
+                if args.dense_refresh_batch_and_nearby >= 0:
+                    # Copy existing embeddings
+                    # Queries
+                    train_query_dense_embeds = copy.deepcopy(prev_train_query_dense_embeds)
 
-                # Dense embeddings of the training queries
-                train_query_dense_embeds = kwargs['biosyn'].embed_dense(
-                    names=kwargs['names_in_train_queries'], show_progress=True)
+                    # Dictionary
+                    train_dict_dense_embeds = copy.deepcopy(prev_train_dict_dense_embeds)
+                    
+                    # All candidates indexes by queries
+                    train_dense_candidate_idxs = copy.deepcopy(prev_train_dense_candidate_idxs)
 
-                # Dense embeddings of the training dictionary
-                train_dict_dense_embeds = kwargs['biosyn'].embed_dense(
-                    names=kwargs['names_in_train_dictionary'], show_progress=True)
-                
+                    # rebuild query embeddings just for the in-batch queries
+                    new_batch_query_dense_embeds = kwargs['biosyn'].embed_dense(
+                        names=kwargs['names_in_train_queries'][query_idx], show_progress=True)
+                        
+                    # Find out-batch queries that are close to in-batch queries
+                    nearby_queries = []
+                    
+                    if args.dense_refresh_batch_and_nearby >= 1:
+                        nearby_query_idxs, _  = kwargs['biosyn'].get_dense_knn(
+                            prev_train_query_dense_embeds,
+                            prev_train_query_dense_embeds,
+                            args.dense_refresh_batch_and_nearby)
+                            
+                        for q_id in query_idx:
+                            nearby_queries = nearby_queries + nearby_query_idxs[q_id]
+
+                    for i, q_id in enumerate(query_idx + nearby_queries):
+                        # Inject this query's embedding
+                        train_query_dense_embeds[q_id] = new_batch_query_dense_embeds[i]
+                        
+                        current_query_neighbors = batch_topk_idxs[i]
+                        
+                        # Rebuild just the embeddings of this query's neighbors
+                        new_batch_dict_dense_embeds = kwargs['biosyn'].embed_dense(
+                            names=kwargs['names_in_train_dictionary'][current_query_neighbors], show_progress=True)
+                            
+                        for j, vocab_id in enumerate(current_query_neighbors):
+                            train_dict_dense_embeds[vocab_id] = new_batch_dict_dense_embeds[j]
+
+                else:
+                    # Dense embeddings of the training queries
+                    train_query_dense_embeds = kwargs['biosyn'].embed_dense(
+                        names=kwargs['names_in_train_queries'], show_progress=True)
+
+                    # Dense embeddings of the training dictionary
+                    train_dict_dense_embeds = kwargs['biosyn'].embed_dense(
+                        names=kwargs['names_in_train_dictionary'], show_progress=True)
+                    
                 # get dense nearest neighbors
                 train_dense_candidate_idxs, _  = kwargs['biosyn'].get_dense_knn(
                     train_query_dense_embeds,
                     train_dict_dense_embeds,
                     args.topk)
+                    
+                # Store the new version of embeddings for next step
+                if args.dense_refresh_batch_and_nearby >= 0:
+                    prev_train_query_dense_embeds = train_query_dense_embeds
+                    prev_train_dict_dense_embeds = train_dict_dense_embeds
+                    prev_train_dense_candidate_idxs = train_dense_candidate_idxs
 
                 if args.save_embeds:
                     LOGGER.info(
@@ -356,6 +412,9 @@ def main(args):
             biosyn=biosyn,
             names_in_train_queries=names_in_train_queries,
             names_in_train_dictionary=names_in_train_dictionary,
+            train_query_dense_embeds=train_query_dense_embeds,
+            train_dict_dense_embeds=train_dict_dense_embeds,
+            train_dense_candidate_idxs=train_dense_candidate_idxs,
         )
 
         LOGGER.info('loss/train_per_epoch={}/{}'.format(train_loss,epoch))
