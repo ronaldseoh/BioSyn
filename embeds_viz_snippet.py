@@ -43,7 +43,7 @@ nonmember_query_embed_change_avg_history = []
 nonmember_query_embed_change_min_history = []
 nonmember_query_embed_change_max_history = []
 
-for i in range(60):
+for i in range(722):
     batch_members = set(np.load(str(i) + '_topk.npy').flatten())
     batch_embeds = np.load(str(i) + '.npy')
     batch_embeds_queries = np.load(str(i) + '_query_embeds.npy')
