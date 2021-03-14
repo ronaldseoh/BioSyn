@@ -172,8 +172,7 @@ def train(args, data_loader, model, **kwargs):
         if args.dense_refresh_interval > 0:
             if i % args.dense_refresh_interval == 0:
                 LOGGER.info(
-                    "Step {}/{} dense embeddings refresh".format(
-                        kwargs['epoch'], args.epoch, train_steps, len(data_loader)))
+                    "Step {}/{} dense embeddings refresh".format(train_steps, len(data_loader)))
                         
                 if args.dense_refresh_batch_and_nearby >= 0:
                     # Copy existing embeddings
@@ -237,14 +236,13 @@ def train(args, data_loader, model, **kwargs):
                     
                 # Store the new version of embeddings for next step
                 if args.dense_refresh_batch_and_nearby >= 0:
-                    prev_train_query_dense_embeds = train_query_dense_embeds
-                    prev_train_dict_dense_embeds = train_dict_dense_embeds
-                    prev_train_dense_candidate_idxs = train_dense_candidate_idxs
+                    prev_train_query_dense_embeds = copy.deepcopy(train_query_dense_embeds)
+                    prev_train_dict_dense_embeds = copy.deepcopy(train_dict_dense_embeds)
+                    prev_train_dense_candidate_idxs = copy.deepcopy(train_dense_candidate_idxs)
 
                 if args.save_embeds:
                     LOGGER.info(
-                        "Step {}/{} dense embeddings serialization".format(
-                            kwargs['epoch'], args.epoch, train_steps, len(data_loader)))
+                        "Step {}/{} dense embeddings serialization".format(train_steps, len(data_loader)))
 
                     # Save to the given path
                     np.save(os.path.join(embeds_dir, str(train_steps) + '.npy'), train_dict_dense_embeds)
