@@ -93,14 +93,16 @@ def main(args):
         score_mode=args.score_mode,
         type_given=args.type_given
     )
-
-    LOGGER.info("acc@1={}".format(result_evalset['acc1']))
-    LOGGER.info("acc@2={}".format(result_evalset['acc2']))
-    LOGGER.info("acc@4={}".format(result_evalset['acc4']))
-    LOGGER.info("acc@8={}".format(result_evalset['acc8']))
-    LOGGER.info("acc@16={}".format(result_evalset['acc16']))
-    LOGGER.info("acc@32={}".format(result_evalset['acc32']))
-    LOGGER.info("acc@64={}".format(result_evalset['acc64']))
+    
+    # Try to report accuracies from acc@1 to acc@64
+    for i in range(6):
+        accuracy_level = 2 ** i
+        
+        # accuracies above arg.topk wouldn't be available
+        if accuracy_level > args.topk:
+            break
+        
+        LOGGER.info("acc@{}={}".format(accuracy_level, result_evalset['acc' + str(accuracy_level)]))
     
     if args.save_predictions:
         output_file = os.path.join(args.output_dir,"predictions_eval.json")
