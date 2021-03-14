@@ -113,7 +113,14 @@ class DictionaryDataset():
             for line in tqdm(lines):
                 line = line.strip()
                 if line == "": continue
-                cui, sty, name = line.split("||")
+                line_split = line.split("||")
+                if len(line_split) == 2:
+                    cui, name = line_split
+                    sty = None
+                elif len(line_split) == 3:
+                    cui, sty, name = line_split
+                else:
+                    raise ValueError("Cannot read dictionary lines where the split length is not 2 or 3")
                 assert sty != ''
                 data.append((name, sty, cui))
         

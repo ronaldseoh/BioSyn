@@ -6,7 +6,10 @@ import pdb
 from tqdm import tqdm
 import faiss
 import nmslib
-import pysparnn.cluster_index as ci
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
+from special_partition.special_partition import special_partition
+from collections import defaultdict
 
 from IPython import embed
 
@@ -238,12 +241,383 @@ def predict_topk(biosyn,
 
     return result
 
+
+def embed_and_index(biosyn, 
+                    names):
+    """
+    Parameters
+    ----------
+    biosyn : BioSyn
+        trained biosyn model
+    names : array
+        list of names to embed and index
+
+    Returns
+    -------
+    sparse_embeds : ndarray
+        matrix of sparse embeddings
+    dense_embeds : ndarray
+        matrix of dense embeddings
+    sparse_index : nmslib
+        nmslib index of the sparse embeddings
+    dense_index : faiss
+        faiss index of the sparse embeddings
+    """
+    # Embed dictionary
+    sparse_embeds = biosyn.embed_sparse(names=names, show_progress=True)
+    dense_embeds = biosyn.embed_dense(names=names, show_progress=True)
+
+    # Build sparse index
+    sparse_index = nmslib.init(
+        method='hnsw',
+        space='negdotprod_sparse_fast',
+        data_type=nmslib.DataType.SPARSE_VECTOR
+    )
+    sparse_index.addDataPointBatch(sparse_embeds)
+    sparse_index.createIndex({'post': 2}, print_progress=False)
+
+    # Build dense index
+    d = dense_embeds.shape[1]
+    nembeds = dense_embeds.shape[0]
+    if nembeds < 10000:  # if the number of embeddings is small, don't approximate
+        dense_index = faiss.IndexFlatIP(d)
+        dense_index.add(dense_embeds)
+    else:
+        # number of quantized cells
+        nlist = int(math.floor(math.sqrt(nembeds)))
+        # number of the quantized cells to probe
+        nprobe = int(math.floor(math.sqrt(nlist)))
+        quantizer = faiss.IndexFlatIP(d)
+        dense_index = faiss.IndexIVFFlat(
+            quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT
+        )
+        dense_index.train(dense_embeds)
+        dense_index.add(dense_embeds)
+        dense_index.nprobe = nprobe
+
+    # Return embeddings and indexes
+    return sparse_embeds, dense_embeds, sparse_index, dense_index
+
+
+def get_query_nn(biosyn,
+                 topk, 
+                 sparse_embeds, 
+                 dense_embeds, 
+                 sparse_index, 
+                 dense_index, 
+                 q_sparse_embed, 
+                 q_dense_embed,
+                 score_mode):
+    """
+    Parameters
+    ----------
+    biosyn : BioSyn
+        trained biosyn model
+    topk : int
+        the number of nearest-neighbour candidates to consider
+    sparse_embeds : ndarray
+        matrix of sparse embeddings
+    dense_embeds : ndarray
+        matrix of dense embeddings
+    sparse_index : nmslib
+        nmslib index of the sparse embeddings
+    dense_index : faiss
+        faiss index of the sparse embeddings
+    q_sparse_embed : ndarray
+        2-D array containing the sparse query embedding
+    q_dense_embed : ndarray
+        2-D array containing the dense query embedding
+    score_mode : str
+        "hybrid", "dense", "sparse"
+
+    Returns
+    -------
+    cand_idxs : array
+        nearest neighbour indices for the query
+    scores : array
+        similarity scores for each nearest neighbour
+    """
+    # Get sparse similarity weight to final score
+    score_sparse_wt = biosyn.get_sparse_weight().item()
+
+    # Find sparse-index k nearest neighbours
+    sparse_knn = sparse_index.knnQueryBatch(
+        q_sparse_embed, k=topk, num_threads=20)
+    sparse_knn_idxs, _ = zip(*sparse_knn)
+    sparse_knn_idxs = np.asarray(sparse_knn_idxs).astype(np.int64)
+    # Find dense-index k nearest neighbours
+    _, dense_knn_idxs = dense_index.search(q_dense_embed, topk)
+    dense_knn_idxs = dense_knn_idxs.astype(np.int64)
+
+    # Get unique candidates
+    cand_idxs = np.unique(np.concatenate(
+        (sparse_knn_idxs.flatten(), dense_knn_idxs.flatten())))
+
+    # Compute query-candidate similarity scores
+    sparse_scores = biosyn.get_score_matrix(
+        query_embeds=q_sparse_embed,
+        dict_embeds=sparse_embeds[cand_idxs, :]
+    ).todense().getA1()
+    dense_scores = biosyn.get_score_matrix(
+        query_embeds=q_dense_embed,
+        dict_embeds=dense_embeds[cand_idxs, :]
+    ).flatten()
+    if score_mode == 'hybrid':
+        scores = score_sparse_wt * sparse_scores + dense_scores
+    elif score_mode == 'dense':
+        scores = dense_scores
+    elif score_mode == 'sparse':
+        scores = sparse_scores
+    else:
+        raise NotImplementedError()
+
+    return cand_idxs, scores
+
+
+def partition_graph(graph, n_entities, return_clusters=False):
+    """
+    Parameters
+    ----------
+    graph : dict
+        object containing rows, cols, data, and shape of the entity-mention joint graph
+    n_entities : int
+        number of entities in the dictionary
+    return_clusters : bool
+        flag to indicate if clusters need to be returned from the partition
+
+    Returns
+    -------
+    partitioned_graph : coo_matrix
+        partitioned graph with each mention connected to only one entity
+    clusters : dict
+        (optional) contains arrays of connected component indices of the graph
+    """
+    # Make the graph symmetric - needed for cluster inference after partitioning
+    _row = np.concatenate((graph['rows'], graph['cols']))
+    _col = np.concatenate((graph['cols'], graph['rows']))
+    _data = np.concatenate((graph['data'], graph['data']))
+    
+    # Filter duplicates
+    _row, _col, _data = list(map(np.array, zip(*set(zip(_row, _col, _data)))))
+
+    # Sort data for efficient DFS
+    tuples = zip(_row, _col, _data)
+    tuples = sorted(tuples, key=lambda x: (x[1], -x[0]))
+    special_row, special_col, special_data = zip(*tuples)
+    special_row = np.asarray(special_row, dtype=np.int)
+    special_col = np.asarray(special_col, dtype=np.int)
+    special_data = np.asarray(special_data)
+
+    # Construct the coo matrix
+    graph = coo_matrix(
+        (special_data, (special_row, special_col)),
+        shape=graph['shape'])
+
+    # Create siamese indices for simple lookup during partitioning
+    edge_indices = {e: i for i, e in enumerate(zip(special_row, special_col))}
+    siamese_indices = [edge_indices[(c, r)]
+                       for r, c in zip(special_row, special_col)]
+    siamese_indices = np.asarray(siamese_indices)
+
+    # Order the edges in ascending order of similarity scores
+    ordered_edge_indices = np.argsort(special_data)
+
+    # Determine which edges to keep in the partitioned graph
+    keep_edge_mask = special_partition(
+        special_row,
+        special_col,
+        ordered_edge_indices,
+        siamese_indices,
+        n_entities)
+
+    # Construct the partitioned graph
+    partitioned_graph = coo_matrix(
+        (special_data[keep_edge_mask],
+        (special_row[keep_edge_mask], special_col[keep_edge_mask])),
+        shape=graph.shape)
+    
+    if return_clusters:
+        # Get an array with each graph index marked with the component label that it is connected to
+        _, cc_labels = connected_components(
+            csgraph=partitioned_graph,
+            directed=False,
+            return_labels=True)
+        # Store clusters of indices marked with labels with at least 2 connected components
+        unique_cc_labels, cc_sizes = np.unique(cc_labels, return_counts=True)
+        filtered_labels = unique_cc_labels[cc_sizes > 1]
+        clusters = defaultdict(list)
+        for i, cc_label in enumerate(cc_labels):
+            if cc_label in filtered_labels:
+                clusters[cc_label].append(i)
+        return partitioned_graph, clusters
+
+    return partitioned_graph
+
+def predict_topk_cluster_link(biosyn,
+                              eval_dictionary,
+                              eval_queries,
+                              topk,
+                              score_mode='hybrid',
+                              debug_mode=False):
+    """
+    Parameters
+    ----------
+    biosyn : BioSyn
+        trained biosyn model
+    eval_dictionary : ndarray
+        entity dictionary to evaluate
+    eval_queries : ndarray
+        mention queries to evaluate
+    topk : int
+        the number of nearest-neighbour candidates to consider
+    score_mode : str
+        "hybrid", "dense", "sparse"
+    debug_mode : bool
+        Flag to enable reporting debug statistics
+    
+    Returns
+    -------
+    results : dict
+        Contains n_entities, n_mentions, k_candidates, accuracy, success[], failure[]
+  
+    Assumptions
+    -----------
+    - type is not given
+    - no composites
+    - predictions returned for every query mention
+    """
+    n_entities = eval_dictionary.shape[0]
+    n_mentions = eval_queries.shape[0]
+
+    # Initialize a graph to store mention-mention and mention-entity similarity score edges
+    joint_graph = {
+        'rows': np.array([]),
+        'cols': np.array([]),
+        'data': np.array([]),
+        'shape': (n_entities+n_mentions, n_entities+n_mentions)
+    }
+
+    # Embed entity dictionary and build indexes
+    dict_sparse_embeds, dict_dense_embeds, dict_sparse_index, dict_dense_index = embed_and_index(
+        biosyn, eval_dictionary[:, 0])
+
+    # Embed mention queries and build indexes
+    men_sparse_embeds, men_dense_embeds, men_sparse_index, men_dense_index = embed_and_index(
+        biosyn, eval_queries[:, 0])
+
+    # Find topK similar entities and mentions for each mention query
+    for eval_query_idx, eval_query in enumerate(tqdm(eval_queries, total=len(eval_queries))):
+        men_sparse_embed = men_sparse_embeds[eval_query_idx:eval_query_idx+1] # Slicing to get a 2-D array
+        men_dense_embed = men_dense_embeds[eval_query_idx:eval_query_idx+1]
+
+        # Fetch NN entity candidates
+        dict_cand_idxs, dict_cand_scores = get_query_nn(
+            biosyn, topk, dict_sparse_embeds, dict_dense_embeds, dict_sparse_index, 
+            dict_dense_index, men_sparse_embed, men_dense_embed, score_mode)
+        # Add mention-entity edges to the joint graph
+        joint_graph['rows'] = np.append(
+            joint_graph['rows'], [n_entities+eval_query_idx]*len(dict_cand_idxs))
+        joint_graph['cols'] = np.append(joint_graph['cols'], dict_cand_idxs)
+        joint_graph['data'] = np.append(joint_graph['data'], dict_cand_scores)
+
+        # Fetch NN mention candidates
+        men_cand_idxs, men_cand_scores = get_query_nn(
+            biosyn, topk, men_sparse_embeds, men_dense_embeds, men_sparse_index, 
+            men_dense_index, men_sparse_embed, men_dense_embed, score_mode)
+        # Filter candidates to remove mention query
+        men_cand_idxs, men_cand_scores = men_cand_idxs[np.where(
+            men_cand_idxs != eval_query_idx)], men_cand_scores[np.where(men_cand_idxs != eval_query_idx)]
+        # Add mention-mention edges to the joint graph
+        joint_graph['rows'] = np.append(
+            joint_graph['rows'], [n_entities+eval_query_idx]*len(men_cand_idxs))
+        joint_graph['cols'] = np.append(
+            joint_graph['cols'], n_entities+men_cand_idxs) # Adding mentions at an offset of maximum entities
+        joint_graph['data'] = np.append(joint_graph['data'], men_cand_scores)
+    
+    # Partition graph based on cluster-linking constraints
+    partitioned_graph, clusters = partition_graph(
+        joint_graph, n_entities, return_clusters=True)
+
+    # Infer predictions from clusters
+    results = {
+        'n_entities': n_entities,
+        'n_mentions': n_mentions,
+        'k_candidates': topk,
+        'accuracy': 0,
+        'failure': [],
+        'success': []
+    }
+    _debug_n_mens_evaluated, _debug_clusters_wo_entities, _debug_clusters_w_mult_entities = 0, 0, 0
+
+    for cluster in tqdm(clusters.values()):
+        # The lowest value in the cluster should always be the entity
+        pred_entity_idx = cluster[0]
+        # Track the graph index of the entity in the cluster
+        pred_entity_idxs = [pred_entity_idx]
+        if pred_entity_idx >= n_entities:
+            # If the first element is a mention, then the cluster does not have an entity
+            _debug_clusters_wo_entities += 1
+            continue
+        pred_entity = eval_dictionary[pred_entity_idx]
+        pred_entity_cuis = pred_entity[2].replace('+', '|').split('|')
+        _debug_tracked_mult_entities = False
+        for i in range(1, len(cluster)):
+            men_idx = cluster[i] - n_entities
+            if men_idx < 0:
+                # If elements after the first are entities, then the cluster has multiple entities
+                if not _debug_tracked_mult_entities:
+                    _debug_clusters_w_mult_entities += 1
+                    _debug_tracked_mult_entities = True
+                # Track the graph indices of each entity in the cluster
+                pred_entity_idxs.append(cluster[i])
+                # Predict based on all entities in the cluster
+                pred_entity_cuis += list(set(eval_dictionary[cluster[i]][2].replace('+', '|').split('|')) - set(pred_entity_cuis))
+                continue
+            _debug_n_mens_evaluated += 1
+            men_query = eval_queries[men_idx]
+            men_golden_cuis = men_query[1].replace('+', '|').split('|')
+            report_obj = {
+                'pm_id': men_query[3],
+                'mention_name': men_query[0],
+                'mention_gold_cui': men_query[1],
+                'predicted_name': '|'.join(eval_dictionary[pred_entity_idxs,0]),
+                'predicted_cui': '|'.join(pred_entity_cuis),
+            }
+            if debug_mode:
+                report_obj['graph_mention_idx'] = cluster[i]
+                report_obj['graph_entity_idx'] = '|'.join(map(str, pred_entity_idxs))
+            # Correct prediction
+            if not set(pred_entity_cuis).isdisjoint(men_golden_cuis):
+                results['accuracy'] += 1
+                results['success'].append(report_obj)
+            # Incorrect prediction
+            else:
+                results['failure'].append(report_obj)
+    results['accuracy'] = f"{results['accuracy'] / float(_debug_n_mens_evaluated if debug_mode else n_mentions) * 100} %"
+
+    if debug_mode:
+        # Report debug statistics
+        results['n_mentions_evaluated'] = _debug_n_mens_evaluated
+        results['n_clusters'] = len(clusters)
+        results['n_clusters_wo_entities'] = _debug_clusters_wo_entities
+        results['n_clusters_w_mult_entities'] = _debug_clusters_w_mult_entities
+    else:
+        # Run sanity checks
+        assert n_mentions == _debug_n_mens_evaluated
+        assert _debug_clusters_wo_entities == 0
+        assert _debug_clusters_w_mult_entities == 0
+
+    return results
+
+
 def evaluate(biosyn,
              eval_dictionary,
              eval_queries,
              topk,
              score_mode='hybrid',
-             type_given=False):
+             type_given=False,
+             use_cluster_linking=False,
+             debug_mode=False):
     """
     predict topk and evaluate accuracy
     
@@ -261,15 +635,22 @@ def evaluate(biosyn,
         hybrid, dense, sparse
     type_given : bool
         whether or not to restrict entity set to ones with gold type
+    use_cluster_linking : bool
+        flag indicating whether the cluster linking inference should be applied or not
+    debug_mode : bool
+        Flag to enable reporting debug statistics for cluster linking
 
     Returns
     -------
     result : dict
         accuracy and candidates
     """
-    result = predict_topk(
-        biosyn, eval_dictionary, eval_queries, topk, score_mode, type_given
-    )
-    result = evaluate_topk_acc(result)
-    
+    if use_cluster_linking:
+        result = predict_topk_cluster_link(
+            biosyn, eval_dictionary, eval_queries, topk, score_mode, debug_mode)
+    else:
+        result = predict_topk(
+            biosyn, eval_dictionary, eval_queries, topk, score_mode, type_given)
+        result = evaluate_topk_acc(result)
+
     return result
