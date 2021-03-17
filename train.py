@@ -200,7 +200,7 @@ def train(args, data_loader, model, **kwargs):
                             
                         cosine_similarities = torch.Tensor(cosine_similarities)
                         
-                        queries_topk = torch.topk(
+                        nearby_queries = torch.topk(
                             cosine_similarities, k=args.dense_refresh_batch_and_nearby,
                             dim=1).indices.flatten()
                             
