@@ -186,7 +186,7 @@ def train(args, data_loader, model, **kwargs):
                     train_dense_candidate_idxs = copy.deepcopy(prev_train_dense_candidate_idxs)
 
                     # Find out-batch queries that are close to in-batch queries
-                    nearby_queries = torch.Tensor([])
+                    nearby_queries = torch.Tensor()
                     
                     # We need to exclude in-batch queries themselves from consideration
                     all_query_indexes_set = set(range(len(prev_train_query_dense_embeds)))
@@ -218,19 +218,28 @@ def train(args, data_loader, model, **kwargs):
                     new_batch_query_dense_embeds = kwargs['biosyn'].embed_dense(
                         names=kwargs['names_in_train_queries'][rebuild_query_ids], show_progress=False)
 
+                    # rebuild_vocab_ids should have no duplicates
+                    rebuild_vocab_ids = set()
+
                     for i, q_id in tqdm(enumerate(rebuild_query_ids)):
                         # Inject this query's embedding
                         train_query_dense_embeds[q_id] = new_batch_query_dense_embeds[i]
                         
-                        current_query_neighbors = data_loader.dataset[int(q_id)][3]
-                        
-                        # Rebuild just the embeddings of this query's neighbors
-                        new_batch_dict_dense_embeds = kwargs['biosyn'].embed_dense(
-                            names=kwargs['names_in_train_dictionary'][current_query_neighbors], show_progress=False)
-                            
-                        for j, vocab_id in enumerate(current_query_neighbors):
-                            train_dict_dense_embeds[vocab_id] = new_batch_dict_dense_embeds[j]
+                        current_query_neighbors = set(data_loader.dataset[int(q_id)][3])
 
+                        # Rebuild just the embeddings of vocab neighbors of the queries in rebuild_query_ids
+                        rebuild_vocab_ids = rebuild_vocab_ids.union(current_query_neighbors)
+
+                    rebuild_vocab_ids = list(rebuild_vocab_ids)
+
+                    # rebuild vocab embeddings for the ones in rebuild_vocab_ids
+                    LOGGER.info("Rebuilding %d vocab embeddings for: " % len(rebuild_vocab_ids) + str(rebuild_vocab_ids))
+
+                    new_batch_dict_dense_embeds = kwargs['biosyn'].embed_dense(
+                        names=kwargs['names_in_train_dictionary'][rebuild_vocab_ids], show_progress=False)
+                        
+                    for j, vocab_id in enumerate(rebuild_vocab_ids):
+                        train_dict_dense_embeds[vocab_id] = new_batch_dict_dense_embeds[j]
                 else:
                     # Dense embeddings of the training queries
                     train_query_dense_embeds = kwargs['biosyn'].embed_dense(
