@@ -152,7 +152,6 @@ def train(args, data_loader, model, **kwargs):
     if args.dense_refresh_batch_and_nearby >= 0:
         prev_train_query_dense_embeds = kwargs['train_query_dense_embeds']
         prev_train_dict_dense_embeds = kwargs['train_dict_dense_embeds']
-        prev_train_dense_candidate_idxs = kwargs['train_dense_candidate_idxs']
     
     for i, data in tqdm(enumerate(data_loader), total=len(data_loader)):
         model.optimizer.zero_grad()
@@ -169,111 +168,114 @@ def train(args, data_loader, model, **kwargs):
         train_loss += loss.item()
         
         # rebuilding dense embeddings
-        if args.dense_refresh_interval > 0:
-            if i % args.dense_refresh_interval == 0:
+        if args.save_embeds or args.dense_refresh_interval > 0:  
+            LOGGER.info(
+                "Step {}/{} dense embedding recompute".format(train_steps, len(data_loader)))
+
+            if args.dense_refresh_interval > 0 and args.dense_refresh_batch_and_nearby >= 0:
+                # Copy existing embeddings
+                # Queries
+                train_query_dense_embeds = copy.deepcopy(prev_train_query_dense_embeds)
+
+                # Dictionary
+                train_dict_dense_embeds = copy.deepcopy(prev_train_dict_dense_embeds)
+
+                # Find out-batch queries that are close to in-batch queries
+                nearby_queries = torch.Tensor()
+                
+                # We need to exclude in-batch queries themselves from consideration
+                all_query_indexes_set = set(range(len(prev_train_query_dense_embeds)))
+                
+                queries_to_consider = list(all_query_indexes_set - set(query_idx.tolist()))
+
+                # If we also want to update queries near the in-batch queries
+                if args.dense_refresh_batch_and_nearby >= 1:
+                    cosine_similarities = sklearn.metrics.pairwise.cosine_similarity(
+                        prev_train_query_dense_embeds[query_idx],
+                        prev_train_query_dense_embeds[queries_to_consider])
+                        
+                    cosine_similarities = torch.Tensor(cosine_similarities)
+                    
+                    nearby_queries = torch.topk(
+                        cosine_similarities, k=args.dense_refresh_batch_and_nearby,
+                        dim=1).indices.flatten()
+                        
+                # query ids of all the queries we need to work on
+                nearby_queries = torch.tensor(
+                    [queries_to_consider[int(q)] for q in nearby_queries.tolist()], dtype=torch.long)
+
+                rebuild_query_ids = torch.cat([query_idx, nearby_queries])
+                
+                print("query_idx =", str(query_idx))
+                print("nearby queries = ", str(nearby_queries))
+                        
+                # rebuild query embeddings for the ones in rebuild_query_ids
+                LOGGER.info("Rebuilding query embeddings for: " + str(rebuild_query_ids))
+
+                new_batch_query_dense_embeds = kwargs['biosyn'].embed_dense(
+                    names=kwargs['names_in_train_queries'][rebuild_query_ids], show_progress=False)
+
+                # rebuild_vocab_ids should have no duplicates
+                rebuild_vocab_ids = set()
+
+                for i, q_id in tqdm(enumerate(rebuild_query_ids)):
+                    # Inject this query's embedding
+                    train_query_dense_embeds[q_id] = new_batch_query_dense_embeds[i]
+                    
+                    current_query_neighbors = set(data_loader.dataset[int(q_id)][3])
+
+                    # Rebuild just the embeddings of vocab neighbors of the queries in rebuild_query_ids
+                    rebuild_vocab_ids = rebuild_vocab_ids.union(current_query_neighbors)
+
+                rebuild_vocab_ids = list(rebuild_vocab_ids)
+
+                # rebuild vocab embeddings for the ones in rebuild_vocab_ids
+                LOGGER.info("Rebuilding %d vocab embeddings for: " % len(rebuild_vocab_ids) + str(rebuild_vocab_ids))
+
+                new_batch_dict_dense_embeds = kwargs['biosyn'].embed_dense(
+                    names=kwargs['names_in_train_dictionary'][rebuild_vocab_ids], show_progress=False)
+                    
+                for j, vocab_id in tqdm(enumerate(rebuild_vocab_ids)):
+                    train_dict_dense_embeds[vocab_id] = new_batch_dict_dense_embeds[j]
+            else:
+                # Dense embeddings of the training queries
+                LOGGER.info("Rebuilding all query embeddings.") 
+                train_query_dense_embeds = kwargs['biosyn'].embed_dense(
+                    names=kwargs['names_in_train_queries'], show_progress=True)
+
+                # Dense embeddings of the training dictionary
+                LOGGER.info("Rebuilding all vocab embeddings.") 
+                train_dict_dense_embeds = kwargs['biosyn'].embed_dense(
+                    names=kwargs['names_in_train_dictionary'], show_progress=True)
+                    
+            # get dense nearest neighbors
+            train_dense_candidate_idxs, _  = kwargs['biosyn'].get_dense_knn(
+                train_query_dense_embeds,
+                train_dict_dense_embeds,
+                args.topk)
+                    
+            # Store the new version of embeddings for next step
+            if args.dense_refresh_interval > 0 and args.dense_refresh_batch_and_nearby >= 0:
+                prev_train_query_dense_embeds = copy.deepcopy(train_query_dense_embeds)
+                prev_train_dict_dense_embeds = copy.deepcopy(train_dict_dense_embeds)
+
+            # Inject the new dense candidates into the training dataset
+            if args.dense_refresh_interval > 0 and i % args.dense_refresh_interval == 0:
                 LOGGER.info(
-                    "Step {}/{} dense embeddings refresh".format(train_steps, len(data_loader)))
-                        
-                if args.dense_refresh_batch_and_nearby >= 0:
-                    # Copy existing embeddings
-                    # Queries
-                    train_query_dense_embeds = copy.deepcopy(prev_train_query_dense_embeds)
+                    "Step {}/{} dense candidate refresh".format(train_steps, len(data_loader)))
 
-                    # Dictionary
-                    train_dict_dense_embeds = copy.deepcopy(prev_train_dict_dense_embeds)
-                    
-                    # All candidates indexes by queries
-                    train_dense_candidate_idxs = copy.deepcopy(prev_train_dense_candidate_idxs)
-
-                    # Find out-batch queries that are close to in-batch queries
-                    nearby_queries = torch.Tensor()
-                    
-                    # We need to exclude in-batch queries themselves from consideration
-                    all_query_indexes_set = set(range(len(prev_train_query_dense_embeds)))
-                    
-                    queries_to_consider = list(all_query_indexes_set - set(query_idx.tolist()))
-
-                    if args.dense_refresh_batch_and_nearby >= 1:
-                        cosine_similarities = sklearn.metrics.pairwise.cosine_similarity(
-                            prev_train_query_dense_embeds[query_idx],
-                            prev_train_query_dense_embeds[queries_to_consider])
-                            
-                        cosine_similarities = torch.Tensor(cosine_similarities)
-                        
-                        nearby_queries = torch.topk(
-                            cosine_similarities, k=args.dense_refresh_batch_and_nearby,
-                            dim=1).indices.flatten()
-                            
-                    # query ids of all the queries we need to work on
-                    nearby_queries = torch.tensor(
-                        [queries_to_consider[int(q)] for q in nearby_queries.tolist()], dtype=torch.long)
-                    rebuild_query_ids = torch.cat([query_idx, nearby_queries])
-                    
-                    print("query_idx =", str(query_idx))
-                    print("nearby queries = ", str(nearby_queries))
-                            
-                    # rebuild query embeddings for the ones in rebuild_query_ids
-                    LOGGER.info("Rebuilding query embeddings for: " + str(rebuild_query_ids))
-
-                    new_batch_query_dense_embeds = kwargs['biosyn'].embed_dense(
-                        names=kwargs['names_in_train_queries'][rebuild_query_ids], show_progress=False)
-
-                    # rebuild_vocab_ids should have no duplicates
-                    rebuild_vocab_ids = set()
-
-                    for i, q_id in tqdm(enumerate(rebuild_query_ids)):
-                        # Inject this query's embedding
-                        train_query_dense_embeds[q_id] = new_batch_query_dense_embeds[i]
-                        
-                        current_query_neighbors = set(data_loader.dataset[int(q_id)][3])
-
-                        # Rebuild just the embeddings of vocab neighbors of the queries in rebuild_query_ids
-                        rebuild_vocab_ids = rebuild_vocab_ids.union(current_query_neighbors)
-
-                    rebuild_vocab_ids = list(rebuild_vocab_ids)
-
-                    # rebuild vocab embeddings for the ones in rebuild_vocab_ids
-                    LOGGER.info("Rebuilding %d vocab embeddings for: " % len(rebuild_vocab_ids) + str(rebuild_vocab_ids))
-
-                    new_batch_dict_dense_embeds = kwargs['biosyn'].embed_dense(
-                        names=kwargs['names_in_train_dictionary'][rebuild_vocab_ids], show_progress=False)
-                        
-                    for j, vocab_id in enumerate(rebuild_vocab_ids):
-                        train_dict_dense_embeds[vocab_id] = new_batch_dict_dense_embeds[j]
-                else:
-                    # Dense embeddings of the training queries
-                    train_query_dense_embeds = kwargs['biosyn'].embed_dense(
-                        names=kwargs['names_in_train_queries'], show_progress=True)
-
-                    # Dense embeddings of the training dictionary
-                    train_dict_dense_embeds = kwargs['biosyn'].embed_dense(
-                        names=kwargs['names_in_train_dictionary'], show_progress=True)
-                    
-                # get dense nearest neighbors
-                train_dense_candidate_idxs, _  = kwargs['biosyn'].get_dense_knn(
-                    train_query_dense_embeds,
-                    train_dict_dense_embeds,
-                    args.topk)
-                    
-                # Store the new version of embeddings for next step
-                if args.dense_refresh_batch_and_nearby >= 0:
-                    prev_train_query_dense_embeds = copy.deepcopy(train_query_dense_embeds)
-                    prev_train_dict_dense_embeds = copy.deepcopy(train_dict_dense_embeds)
-                    prev_train_dense_candidate_idxs = copy.deepcopy(train_dense_candidate_idxs)
-
-                if args.save_embeds:
-                    LOGGER.info(
-                        "Step {}/{} dense embeddings serialization".format(train_steps, len(data_loader)))
-
-                    # Save to the given path
-                    np.save(os.path.join(embeds_dir, str(train_steps) + '.npy'), train_dict_dense_embeds)
-                    np.save(os.path.join(embeds_dir, str(train_steps) + '_query_embeds.npy'), train_query_dense_embeds)
-                    np.save(os.path.join(embeds_dir, str(train_steps) + '_topk.npy'), batch_topk_idxs)
-                    np.save(os.path.join(embeds_dir, str(train_steps) + '_topk_by_queries.npy'), train_dense_candidate_idxs)
-                    np.save(os.path.join(embeds_dir, str(train_steps) + '_query_idx.npy'), query_idx)
-                    
-                # Inject the new dense candidates into the training dataset
                 data_loader.dataset.set_dense_candidate_idxs(d_candidate_idxs=train_dense_candidate_idxs)
+            
+            if args.save_embeds:
+                LOGGER.info(
+                    "Step {}/{} dense embeddings serialization".format(train_steps, len(data_loader)))
+
+                # Save to the given path
+                np.save(os.path.join(embeds_dir, str(train_steps) + '.npy'), train_dict_dense_embeds)
+                np.save(os.path.join(embeds_dir, str(train_steps) + '_query_embeds.npy'), train_query_dense_embeds)
+                np.save(os.path.join(embeds_dir, str(train_steps) + '_topk.npy'), batch_topk_idxs)
+                np.save(os.path.join(embeds_dir, str(train_steps) + '_topk_by_queries.npy'), train_dense_candidate_idxs)
+                np.save(os.path.join(embeds_dir, str(train_steps) + '_query_idx.npy'), query_idx)
 
         train_steps += 1
 
@@ -392,6 +394,7 @@ def main(args):
 
             os.makedirs(embeds_dir, exist_ok=True)
 
+            # Save dense embeddings for the current epoch into npy file
             np.save(os.path.join(embeds_dir, 'initial.npy'), train_dict_dense_embeds)
             np.save(os.path.join(embeds_dir, 'initial_query_embeds.npy'), train_query_dense_embeds)
             np.save(os.path.join(embeds_dir, 'initial_topk_by_queries.npy'), train_dense_candidate_idxs)
@@ -400,7 +403,6 @@ def main(args):
         train_set.set_dense_candidate_idxs(d_candidate_idxs=train_dense_candidate_idxs)
 
         # train
-        # Save dense embeddings for the current epoch into npy file
         train_loss = train(
             args, data_loader=train_loader, model=model,
             epoch=epoch,
