@@ -157,7 +157,7 @@ def train(args, data_loader, model, **kwargs):
     for i, data in tqdm(enumerate(data_loader), total=len(data_loader)):
         model.optimizer.zero_grad()
         
-        if args.save_embeds:
+        if args.save_embeds or args.dense_refresh_interval > 0:
             batch_x, batch_y, query_idx, batch_topk_idxs = data
         else:
             batch_x, batch_y = data
