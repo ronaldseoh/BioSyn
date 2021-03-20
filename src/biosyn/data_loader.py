@@ -113,7 +113,17 @@ class DictionaryDataset():
             for line in tqdm(lines):
                 line = line.strip()
                 if line == "": continue
-                cui, sty, name = line.split("||")
+                line_parsed = line.split("||")
+                
+                if len(line_parsed) == 3:
+                    cui = line_parsed[0]
+                    sty = line_parsed[1]
+                    name = line_parsed[2]
+                elif len(line_parsed) == 2:
+                    cui = line_parsed[0]
+                    sty = "default"
+                    name = line_parsed[1]
+
                 assert sty != ''
                 data.append((name, sty, cui))
         
