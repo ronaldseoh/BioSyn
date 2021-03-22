@@ -1,5 +1,16 @@
 #!/bin/bash
 
+# Check for debug flag
+debug_flag=""
+while getopts ":d" opt; do
+  case $opt in
+    d)
+      echo "DEBUG_MODE=ON" >&2
+      debug_flag="--debug_mode"
+      ;;
+  esac
+done
+
 eval "$(conda shell.bash hook)"
 conda activate biosyn
 
@@ -17,7 +28,6 @@ python eval.py \
     --output_dir ${OUTPUT_DIR} \
     --use_cluster_linking \
     --use_cuda \
-    --topk 8 \
+    --topk 16 \
     --max_length 25 \
-    --save_predictions
-    #--debug_mode
+    --save_predictions $debug_flag
