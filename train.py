@@ -85,6 +85,10 @@ def parse_args():
     parser.add_argument('--dense_refresh_batch_multi_hop',
                         help='refresh embeddings of ',
                         default=-1, type=int)
+                        
+    parser.add_argument('--dense_refresh_batch_random',
+                        help='refresh embeddings of ',
+                        default=-1, type=int)
 
     args = parser.parse_args()
     return args
@@ -212,7 +216,7 @@ def train(args, data_loader, model, **kwargs):
                         [queries_to_consider[int(q)] for q in nearby_query_search_results], dtype=torch.long)
                         
                     print("%d in-batch queries' neighbors:" % len(nearby_query_ids) + str(nearby_query_ids))
-                        
+
                     if args.dense_refresh_batch_multi_hop >= 1:
                         current_hop = nearby_query_ids
                         multi_hop_queries_to_consider = list(set(queries_to_consider) - set(nearby_query_ids.tolist()))
@@ -244,8 +248,23 @@ def train(args, data_loader, model, **kwargs):
 
                 rebuild_query_ids = torch.cat([query_idx, nearby_query_ids])
                 
+                nonneighbor_query_ids = []
+
+                if args.dense_refresh_batch_random >= 1:
+                    nonneighbor_queries_to_consider = list(all_query_indexes_set - set(rebuild_query_ids.tolist()))
+                    
+                    # Randomly choose non-neighbors
+                    nonneighbor_query_ids = random.sample(
+                        nonneighbor_queries_to_consider,
+                        k=args.dense_refresh_batch_random)
+                        
+                    nonneighbor_query_ids = torch.tensor(nonneighbor_query_ids, dtype=torch.long)
+                    
+                    rebuild_query_ids = torch.cat([rebuild_query_ids, nonneighbor_query_ids])
+                
                 print("query_idx =", str(query_idx))
                 print("nearby queries =", str(nearby_query_ids))
+                print("random non-neighbor queries =", str(nonneighbor_query_ids))
                         
                 # rebuild query embeddings for the ones in rebuild_query_ids
                 LOGGER.info("Rebuilding %d query embeddings for: " % len(rebuild_query_ids) + str(rebuild_query_ids))
