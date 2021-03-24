@@ -8,7 +8,7 @@ import faiss
 import nmslib
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
-from special_partition.special_partition import special_partition
+from special_partition.special_partition import cluster_linking_partition
 from collections import defaultdict
 import pickle
 
@@ -375,14 +375,15 @@ def get_query_nn(biosyn,
     else:
         raise ValueError()
 
-    # Return the topk neighbours
-    
+    # Sort the candidates by descending order of scores
     cand_idxs, scores = zip(
         *sorted(zip(cand_idxs, scores), key=lambda x: -x[1]))
+    
+    # Return the topk neighbours
     return np.array(cand_idxs[:topk]), np.array(scores[:topk])
 
 
-def partition_graph(graph, n_entities, return_clusters=False):
+def partition_graph(graph, n_entities, directed, return_clusters=False):
     """
     Parameters
     ----------
@@ -390,6 +391,8 @@ def partition_graph(graph, n_entities, return_clusters=False):
         object containing rows, cols, data, and shape of the entity-mention joint graph
     n_entities : int
         number of entities in the dictionary
+    directed : bool
+        whether the graph construction should be directed or undirected
     return_clusters : bool
         flag to indicate if clusters need to be returned from the partition
 
@@ -400,64 +403,22 @@ def partition_graph(graph, n_entities, return_clusters=False):
     clusters : dict
         (optional) contains arrays of connected component indices of the graph
     """
-    # Make the graph symmetric - needed for cluster inference after partitioning
-    _row = np.concatenate((graph['rows'], graph['cols']))
-    _col = np.concatenate((graph['cols'], graph['rows']))
-    _data = np.concatenate((graph['data'], graph['data']))
-    
-    # Filter duplicates
-    seen = set()
-    _f_row, _f_col, _f_data = [], [], []
-    for k, _ in enumerate(_row):
-        if (_row[k], _col[k]) in seen:
-            continue
-        seen.add((_row[k], _col[k]))
-        _f_row.append(_row[k])
-        _f_col.append(_col[k])
-        _f_data.append(_data[k])
-    _row, _col, _data = list(map(np.array, (_f_row, _f_col, _f_data)))
-
-    # Sort data for efficient DFS
-    tuples = zip(_row, _col, _data)
-    tuples = sorted(tuples, key=lambda x: (x[1], -x[0]))
-    special_row, special_col, special_data = zip(*tuples)
-    special_row = np.asarray(special_row, dtype=np.int)
-    special_col = np.asarray(special_col, dtype=np.int)
-    special_data = np.asarray(special_data)
-
-    # Construct the coo matrix
-    graph = coo_matrix(
-        (special_data, (special_row, special_col)),
-        shape=graph['shape'])
-
-    # Create siamese indices for simple lookup during partitioning
-    edge_indices = {e: i for i, e in enumerate(zip(special_row, special_col))}
-    siamese_indices = [edge_indices[(c, r)]
-                       for r, c in zip(special_row, special_col)]
-    siamese_indices = np.asarray(siamese_indices)
-
-    # Order the edges in ascending order of similarity scores
-    ordered_edge_indices = np.argsort(special_data)
-
-    # Determine which edges to keep in the partitioned graph
-    keep_edge_mask = special_partition(
-        special_row,
-        special_col,
-        ordered_edge_indices,
-        siamese_indices,
-        n_entities)
-
+    rows, cols, data = cluster_linking_partition(
+        graph['rows'],
+        graph['cols'],
+        graph['data'],
+        n_entities,
+        directed
+    )
     # Construct the partitioned graph
     partitioned_graph = coo_matrix(
-        (special_data[keep_edge_mask],
-        (special_row[keep_edge_mask], special_col[keep_edge_mask])),
-        shape=graph.shape)
+        (data, (rows, cols)), shape=graph['shape'])
     
     if return_clusters:
         # Get an array with each graph index marked with the component label that it is connected to
         _, cc_labels = connected_components(
             csgraph=partitioned_graph,
-            directed=False,
+            directed=directed,
             return_labels=True)
         # Store clusters of indices marked with labels with at least 2 connected components
         unique_cc_labels, cc_sizes = np.unique(cc_labels, return_counts=True)
@@ -503,7 +464,8 @@ def analyzeClusters(clusters, eval_dictionary, eval_queries, topk, debug_mode):
     }
     _debug_n_mens_evaluated, _debug_clusters_wo_entities, _debug_clusters_w_mult_entities = 0, 0, 0
 
-    for cluster in tqdm(clusters.values()):
+    print("Analyzing clusters")
+    for cluster in clusters.values():
         # The lowest value in the cluster should always be the entity
         pred_entity_idx = cluster[0]
         # Track the graph index of the entity in the cluster
@@ -568,6 +530,7 @@ def predict_topk_cluster_link(biosyn,
                               eval_dictionary,
                               eval_queries,
                               topk,
+                              directed,
                               output_dir,
                               score_mode='hybrid',
                               debug_mode=False):
@@ -582,6 +545,8 @@ def predict_topk_cluster_link(biosyn,
         mention queries to evaluate
     topk : int
         the number of nearest-neighbour mention candidates to consider
+    directed : bool
+        whether the graph construction should be directed or undirected
     output_dir : str
         output directory path for intermediate files and results
     score_mode : str
@@ -604,12 +569,13 @@ def predict_topk_cluster_link(biosyn,
     n_mentions = eval_queries.shape[0]
 
     # Values of k to run the evaluation against
-    topk_vals = [0, *[2**i for i in range(int(math.log(topk, 2)) + 1)]]
+    topk_vals = [0] + [2**i for i in range(int(math.log(topk, 2)) + 1)]
     # Store the maximum evaluation k
     topk = topk_vals[-1]
 
     # Check if graphs are already built
     if __import__('os').path.isfile(f'{output_dir}/graphs.pickle'):
+        print("Loading stored joint graphs")
         with open(f'{output_dir}/graphs.pickle', 'rb') as read_handle:
             joint_graphs = pickle.load(read_handle)
     else:
@@ -625,15 +591,17 @@ def predict_topk_cluster_link(biosyn,
             }
 
         # Embed entity dictionary and build indexes
+        print("Dictionary: Embedding and building indexes")
         dict_sparse_embeds, dict_dense_embeds, dict_sparse_index, dict_dense_index = embed_and_index(
             biosyn, eval_dictionary[:, 0])
 
         # Embed mention queries and build indexes
+        print("Queries: Embedding and building indexes")
         men_sparse_embeds, men_dense_embeds, men_sparse_index, men_dense_index = embed_and_index(
             biosyn, eval_queries[:, 0])
 
         # Find the most similar entity and topk mentions for each mention query
-        for eval_query_idx, eval_query in enumerate(tqdm(eval_queries, total=len(eval_queries))):
+        for eval_query_idx, eval_query in enumerate(tqdm(eval_queries, total=len(eval_queries), desc="Fetching k-NN")):
             men_sparse_embed = men_sparse_embeds[eval_query_idx:eval_query_idx+1] # Slicing to get a 2-D array
             men_dense_embed = men_dense_embeds[eval_query_idx:eval_query_idx+1]
 
@@ -675,9 +643,10 @@ def predict_topk_cluster_link(biosyn,
 
     results = []
     for k in joint_graphs:
+        print(f"Graph (k={k}):")
         # Partition graph based on cluster-linking constraints
         partitioned_graph, clusters = partition_graph(
-            joint_graphs[k], n_entities, return_clusters=True)
+            joint_graphs[k], n_entities, directed, return_clusters=True)
         # Infer predictions from clusters
         result = analyzeClusters(clusters, eval_dictionary, eval_queries, k, debug_mode)
         # Store result
@@ -693,6 +662,7 @@ def evaluate(biosyn,
              score_mode='hybrid',
              type_given=False,
              use_cluster_linking=False,
+             directed=True,
              debug_mode=False):
     """
     predict topk and evaluate accuracy
@@ -715,6 +685,8 @@ def evaluate(biosyn,
         whether or not to restrict entity set to ones with gold type
     use_cluster_linking : bool
         flag indicating whether the cluster linking inference should be applied or not
+    directed : bool
+        whether the graph construction should be directed or undirected
     debug_mode : bool
         Flag to enable reporting debug statistics for cluster linking
 
@@ -725,7 +697,7 @@ def evaluate(biosyn,
     """
     if use_cluster_linking:
         result = predict_topk_cluster_link(
-            biosyn, eval_dictionary, eval_queries, topk, output_dir, score_mode, debug_mode)
+            biosyn, eval_dictionary, eval_queries, topk, directed, output_dir, score_mode, debug_mode)
     else:
         result = predict_topk(
             biosyn, eval_dictionary, eval_queries, topk, score_mode, type_given)
