@@ -189,7 +189,7 @@ def train(args, data_loader, model, **kwargs):
                 train_dict_dense_embeds = copy.deepcopy(prev_train_dict_dense_embeds)
 
                 # Find out-batch queries that are close to in-batch queries
-                nearby_query_ids = torch.Tensor()
+                nearby_query_ids = torch.tensor([], dtype=torch.long)
                 
                 # We need to exclude in-batch queries themselves from consideration
                 all_query_indexes_set = set(range(len(prev_train_query_dense_embeds)))
